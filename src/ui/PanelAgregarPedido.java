@@ -1,6 +1,7 @@
 package ui;
 
 import data.enumerate.TipoPedido;
+import data.persistence.PedidoDAO;
 import data.util.GestorArchivoPedidos;
 import model.core.Pedido;
 import model.entities.business.ZonaCarga;
@@ -16,7 +17,7 @@ public class PanelAgregarPedido extends JPanel {
 
     private final ArrayList<Pedido> listaPedidos;
     private final ZonaCarga zonaCarga;
-    private final String rutaPedidos;
+    private final PedidoDAO pedidoDAO = new PedidoDAO();
 
     private JComboBox<TipoPedido> comboTipo;
     private JTextField campoId;
@@ -25,10 +26,9 @@ public class PanelAgregarPedido extends JPanel {
     private JLabel labelPeso;
     private JSpinner spinnerPeso;
 
-    public PanelAgregarPedido(Navegador navegador, ArrayList<Pedido> listaPedidos, ZonaCarga zonaCarga, String rutaPedidos) {
+    public PanelAgregarPedido(Navegador navegador, ArrayList<Pedido> listaPedidos, ZonaCarga zonaCarga) {
         this.listaPedidos = listaPedidos;
         this.zonaCarga = zonaCarga;
-        this.rutaPedidos = rutaPedidos;
         construirInterfaz(navegador);
     }
 
@@ -42,11 +42,9 @@ public class PanelAgregarPedido extends JPanel {
         JPanel panelFormulario = new JPanel(new GridLayout(0, 2, 10, 12));
         panelFormulario.setBorder(BorderFactory.createEmptyBorder(20, 60, 10, 60));
 
-        // El combo solo muestra los 3 valores posibles (los ítems del enum);
-        // Swing usa TipoPedido.toString() -> descripcionVisible para pintarlos.
         comboTipo = new JComboBox<>(TipoPedido.values());
         campoId = new JTextField();
-        campoId.setEditable(false); // el ID es siempre calculado, nunca editable a mano
+        campoId.setEditable(false);
         campoDireccion = new JTextField();
         spinnerDistancia = new JSpinner(new SpinnerNumberModel(1.0, 0.1, 999.0, 0.1));
         labelPeso = new JLabel("Peso (kg):");
@@ -81,9 +79,6 @@ public class PanelAgregarPedido extends JPanel {
         actualizarFormulario();
     }
 
-    // Se ejecuta cada vez que cambia el tipo seleccionado, y también cada vez
-    // que se vuelve a mostrar este panel (ver VentanaPrincipal.refrescarPanel):
-    // recalcula el ID correlativo y muestra/oculta el campo de peso.
     public void actualizarFormulario() {
         TipoPedido tipoSeleccionado = (TipoPedido) comboTipo.getSelectedItem();
         campoId.setText(GestorArchivoPedidos.siguienteId(tipoSeleccionado, listaPedidos));
@@ -106,29 +101,25 @@ public class PanelAgregarPedido extends JPanel {
         }
 
         Pedido nuevoPedido;
-        String lineaArchivo;
 
         switch (tipoSeleccionado) {
             case COMIDA:
                 nuevoPedido = new PedidoComida(id, direccion, distancia);
-                lineaArchivo = tipoSeleccionado.getNombreClase() + ";" + id + ";" + direccion + ";" + distancia;
                 break;
             case EXPRESS:
                 nuevoPedido = new PedidoExpress(id, direccion, distancia);
-                lineaArchivo = tipoSeleccionado.getNombreClase() + ";" + id + ";" + direccion + ";" + distancia;
                 break;
             case ENCOMIENDA:
                 double peso = (double) spinnerPeso.getValue();
                 nuevoPedido = new PedidoEncomienda(id, direccion, distancia, peso);
-                lineaArchivo = tipoSeleccionado.getNombreClase() + ";" + id + ";" + direccion + ";" + distancia + ";" + peso;
                 break;
             default:
-                return; // No debería ocurrir: el combo solo ofrece estos 3 valores
+                return;
         }
 
         listaPedidos.add(nuevoPedido);
         zonaCarga.agregarPedido(nuevoPedido);
-        GestorArchivoPedidos.agregarLinea(lineaArchivo, rutaPedidos);
+        pedidoDAO.insertar(nuevoPedido);
 
         JOptionPane.showMessageDialog(this, "Pedido " + id + " guardado correctamente.",
                 "Pedido registrado", JOptionPane.INFORMATION_MESSAGE);

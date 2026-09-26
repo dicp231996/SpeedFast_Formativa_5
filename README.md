@@ -1,141 +1,259 @@
 # SpeedFast 🚀
 
-## Descripción de la Aplicación
+Sistema de gestión de despachos/logística desarrollado en **Java (Swing)** como
+proyecto para la asignatura de **Programación Orientada a Objetos II**.
 
-**SpeedFast** es un sistema de gestión de logística y despachos enfocado en la administración ágil de envíos. La plataforma coordina eficientemente a los **repartidores** y clasifica los requerimientos operativos en tres tipos principales: **Pedidos de Comida, Encomiendas y Pedidos Express**.
-
-El proyecto está desarrollado bajo los principios de la Programación Orientada a Objetos, implementando una arquitectura estructurada que separa la lógica del dominio (entidades, modelos principales y objetos de valor) de la persistencia de datos y utilidades. La carga de información inicial se realiza dinámicamente mediante lectura de archivos de texto sin formato y **reflexión** (`GestorInstancias`).
-
-Además del uso de interfaces comunes entre las distintas jerarquías de clases, el sistema incorpora **concurrencia real**: cada repartidor se ejecuta en su propio hilo (administrados mediante un `ExecutorService`), y la entrega de pedidos entre la Fase de asignación y la Fase de ejecución se coordina a través de una **Zona de Carga** protegida con `synchronized` y respaldada por un `BlockingQueue`, garantizando que cada pedido sea retirado una única vez.
-
-Objetivo de la actividad: trabajar con interfaces comunes para las diferentes clases y aplicar mecanismos de concurrencia (hilos, `ExecutorService`, colecciones concurrentes) sobre un modelo de dominio orientado a objetos.
+SpeedFast simula el ciclo completo de una empresa de delivery: se registran
+pedidos, se asignan a repartidores (manual o automáticamente), y luego se
+"ejecuta" la entrega mediante **hilos concurrentes**, dejando registro
+persistente de todo en una base de datos **MySQL**.
 
 ---
 
-## Ciclo de vida de un pedido
+## Índice
 
-Cada `Pedido` avanza a través de los siguientes estados (`EstadoPedido`), controlados desde el propio pedido mediante el método `nuevoEstado(...)`:
+1. [Características principales](#características-principales)
+2. [Arquitectura del proyecto](#arquitectura-del-proyecto)
+3. [Modelo de dominio](#modelo-de-dominio)
+4. [Concurrencia](#concurrencia)
+5. [Persistencia (base de datos)](#persistencia-base-de-datos)
+6. [Interfaz gráfica (Swing)](#interfaz-gráfica-swing)
+7. [Cómo ejecutar el proyecto](#cómo-ejecutar-el-proyecto)
+8. [Estructura de carpetas](#estructura-de-carpetas)
+9. [Limitaciones conocidas](#limitaciones-conocidas)
 
-```text
-PENDIENTE  →  CONFIRMADO  →  EN_REPARTO  →  ENTREGADO
-                  ↓
-              CANCELADO (si se cancela antes de ser retirado, o en ruta para PedidoComida)
+---
+
+## Características principales
+
+- **Registro de pedidos** de 3 tipos distintos (Comida, Encomienda, Compra
+  Express), cada uno con sus propias reglas de negocio.
+- **Asignación de repartidores**, tanto manual (el usuario elige a quién
+  asignar) como automática (el sistema busca el repartidor más apto según
+  tipo de servicio, capacidad de peso, mochila térmica y cercanía).
+- **Ejecución de entregas mediante hilos**: cada repartidor con pedidos
+  asignados corre en su propio hilo (`Thread`), retira **un pedido a la vez**
+  desde la Zona de Carga, lo entrega (simulado con tiempos de espera
+  aleatorios) y vuelve por el siguiente, hasta agotar sus pedidos.
+- **Consola en vivo con código de colores**: el panel de ejecución muestra el
+  progreso de cada hilo en tiempo real, coloreando cada línea según el estado
+  del pedido (confirmado, en reparto, entregado, cancelado, etc.).
+- **Persistencia en base de datos MySQL**: pedidos, repartidores y el
+  historial de entregas se guardan y leen directamente desde una base de
+  datos, reemplazando el enfoque inicial de archivos `.txt`.
+- **Gestión de repartidores**: nómina completa de empleados, alta de nuevos
+  repartidores y conteo de cuántas entregas realizó cada uno durante el día.
+- Manejo correcto de **tildes/ñ (UTF-8)** en toda la aplicación (consola,
+  archivos y base de datos).
+
+---
+
+## Arquitectura del proyecto
+
+El proyecto está organizado **por rol/responsabilidad** (no por feature),
+siguiendo principios de POO: herencia, polimorfismo, interfaces, y separación
+de capas (modelo de dominio / persistencia / interfaz gráfica).
+
+```
+app       -> Puntos de entrada de la aplicación (consola y GUI)
+model     -> Entidades de dominio (Pedido, Repartidor, Persona, etc.)
+data      -> Enumeradores, utilidades y capa de acceso a datos (DAO)
+ui        -> Paneles y ventanas Swing
 ```
 
-- **PENDIENTE**: el pedido fue creado y espera ser evaluado en la Fase de asignación.
-- **CONFIRMADO**: un repartidor cumplió `validarRequisitos(...)` y quedó asignado; el pedido ingresa a la **Zona de Carga**, disponible para ser retirado.
-- **EN_REPARTO**: el repartidor asignado retiró el pedido de la Zona de Carga y comenzó su entrega.
-- **ENTREGADO**: la simulación de entrega (`HiloEntrega`) finalizó exitosamente.
-- **CANCELADO**: el pedido fue cancelado (antes de despacho, o en ruta mediante la excepción de `PedidoComida`); es un estado terminal, no vuelve a ningún pool de espera.
-
 ---
 
-## Estructura del Proyecto
+## Modelo de dominio
 
-```text
-├── resources/
-│   ├── pedidos.txt
-│   └── repartidores.txt
-└── src/
-    ├── app/
-    │   ├── SpeedFast.java
-    │   └── SpeedFastGUI.java
-    ├── data/
-    │   ├── enumerate/
-    │   │   ├── TipoServicio.java
-    │   │   ├── EstadoPedido.java
-    │   │   └── TipoPedido.java
-    │   └── util/
-    │       ├── ControladorEnvios.java
-    │       ├── GestorArchivoPedidos.java
-    │       ├── GestorFases.java
-    │       ├── GestorInstancias.java
-    │       └── LectorDatos.java
-    ├── model/
-    │   ├── core/
-    │   │   ├── Pedido.java
-    │   │   └── Persona.java
-    │   ├── entities/
-    │   │   ├── business/
-    │   │   │   └── ZonaCarga.java
-    │   │   ├── dealer/
-    │   │   │   └── Repartidor.java
-    │   │   └── order/
-    │   │       ├── PedidoComida.java
-    │   │       ├── PedidoEncomienda.java
-    │   │       └── PedidoExpress.java
-    │   ├── interfaces/
-    │   │   ├── IDespachable.java
-    │   │   ├── ICancelable.java
-    │   │   ├── IRastreable.java
-    │   │   └── IRunnable.java
-    │   └── valueobjects/
-    │       └── HiloEntrega.java
-    └── ui/
-        ├── Navegador.java
-        ├── VentanaPrincipal.java
-        ├── PanelMenuPrincipal.java
-        ├── PanelAgregarPedido.java
-        ├── PanelZonaCarga.java
-        ├── PanelAsignacion.java
-        └── PanelAsignacionManual.java
+### Jerarquía de Pedido
+
+```
+Pedido (clase abstracta)
+ ├── PedidoComida
+ ├── PedidoEncomienda
+ └── PedidoExpress
 ```
 
-### Convención de paquetes
+`Pedido` implementa:
+- `IDespachable` → `despachar()`: lógica de envío propia de cada subtipo.
+- `ICancelable` → `cancelar(motivo)`, `isCancelado()`, `getMotivoCancelacion()`.
+- `IRastreable` → `rastrear()`: devuelve el estado/ubicación simulada del pedido.
 
-- **`model.core`**: superclases del dominio (`Pedido`, `Persona`) — atributos y comportamientos comunes a todas sus jerarquías de hijos.
-- **`model.entities`**: clases concretas, hijas de las superclases de `core`, agrupadas por su rol en el negocio:
-  - `entities.order`: los distintos tipos de pedido (`PedidoComida`, `PedidoEncomienda`, `PedidoExpress`).
-  - `entities.dealer`: los repartidores (`Repartidor`).
-  - `entities.business`: entidades de negocio que coordinan la interacción entre otras entidades, sin pertenecer a ninguna jerarquía de herencia propia (`ZonaCarga`).
-- **`model.interfaces`**: contratos comunes implementados por múltiples líneas de herencia (`IDespachable`, `ICancelable`, `IRastreable`, `IRunnable`).
-- **`model.valueobjects`**: objetos que encapsulan un proceso o validación puntual, usados desde varias clases/subclases sin tener estado de negocio propio (`HiloEntrega`).
-- **`data.enumerate`**: enumeradores del dominio (`TipoServicio`, `EstadoPedido`) y de soporte a la interfaz gráfica (`TipoPedido`, con sus 3 representaciones: texto visible en el combo, clave del enum, y nombre de clase para persistencia).
-- **`data.util`**: utilitarios de orquestación y carga de datos, sin representar entidades del negocio (`GestorFases`, `GestorInstancias`, `LectorDatos`, `ControladorEnvios`, `GestorArchivoPedidos`).
-- **`ui`**: interfaz gráfica de escritorio (Swing). Un único `JFrame` (`VentanaPrincipal`) con `CardLayout`, donde cada pantalla es un `JPanel` intercambiable en vez de una ventana aparte, coordinados mediante la interfaz `Navegador`.
+Cada pedido tiene un **ciclo de vida** representado por el enum
+`EstadoPedido`:
+
+```
+PENDIENTE → CONFIRMADO → EN_REPARTO → ENTREGADO
+                                   ↘ CANCELADO
+```
+
+Las transiciones normales se hacen con `pedido.nuevoEstado(...)` (imprime el
+cambio en consola). Al reconstruir un pedido desde la base de datos se usan
+`restaurarEstado(...)` / `restaurarCancelacion(...)`, que fijan el estado
+**sin** disparar esos mensajes (evita "ruido" en la consola al simplemente
+cargar datos existentes).
+
+### Repartidor
+
+`Repartidor` hereda de `Persona` e implementa `Runnable` (además de una
+interfaz propia `IRunnable`). Contiene:
+
+- Datos personales (heredados de `Persona`: nombre, teléfono).
+- `rut`: identificador de negocio, usado como clave natural para relacionar
+  un pedido con su repartidor en la base de datos.
+- `vehiculo`: dato informativo, no afecta ninguna regla de asignación.
+- `tipoServicio`, `tieneMochilaTermica`, `capacidadPesoMax`,
+  `estaCercaUbicacion`: usados por el algoritmo de asignación automática.
+- Un arreglo fijo de máximo 5 pedidos asignados simultáneamente.
+
+### ZonaCarga
+
+Actúa como una bodega/cola compartida de pedidos pendientes por retirar.
+Es **thread-safe**: sus métodos están sincronizados para que varios
+repartidores (hilos) puedan retirar pedidos al mismo tiempo sin condiciones
+de carrera. El método clave es `retirarUnPedido(repartidor)`, que entrega
+**un solo pedido apto** a la vez (no el lote completo), forzando a cada
+repartidor a volver a la zona de carga después de cada entrega.
 
 ---
 
-## Interfaz Gráfica (GUI)
+## Concurrencia
 
-Punto de entrada: **`app.SpeedFastGUI`** (independiente de `SpeedFast.java`, que sigue siendo la versión de consola).
+El flujo de ejecución de entregas usa dos niveles de hilos:
 
-`VentanaPrincipal` mantiene el estado compartido de la sesión (`listaPedidos`, `listaRepartidores`, `ZonaCarga`, `ControladorEnvios`) y aloja los siguientes paneles dentro de un mismo `CardLayout`, navegables **sin cerrar ninguna ventana**:
+1. **Un `ExecutorService`** lanza un hilo por cada repartidor que tiene al
+   menos un pedido asignado (`Repartidor implements Runnable`).
+2. Dentro de `Repartidor.run()`, por cada pedido que retira se crea y lanza
+   un **hilo hijo** (`HiloEntrega implements Runnable`, ejecutado como
+   `Thread`) que simula el tiempo de viaje/entrega con
+   `ThreadLocalRandom`, y el hilo padre espera con `join()` antes de volver
+   por el siguiente pedido.
 
-- **`PanelMenuPrincipal`**: menú con 3 botones — Añadir Pedido, Ver Zona de Carga, Asignar Pedidos.
-- **`PanelAgregarPedido`**: formulario de registro. El combo de tipo (`TipoPedido`) determina dinámicamente qué constructor se usa (`PedidoComida`/`PedidoExpress` con 3 parámetros, `PedidoEncomienda` con 4, mostrando el campo Peso solo en ese caso) y el ID correlativo se autogenera calificando cada pedido existente por su sigla (`COM`/`ENC`/`EXP`), nunca editable a mano.
-- **`PanelZonaCarga`**: tabla de solo lectura con todos los pedidos registrados, ordenados por ID correlativo (orden en memoria, no afecta `pedidos.txt`), con filtro por tipo y un resumen de conteos (`Comida | Encomienda | Express | Total`).
-- **`PanelAsignacion`**: elige entre asignación Automática (ejecuta la misma regla de `GestorFases.asignarAutomatico`) o Manual.
-- **`PanelAsignacionManual`**: por cada pedido pendiente, muestra los repartidores elegibles (`validarRequisitos`) para elegir uno.
+Esto modela de forma realista que un repartidor **no puede llevar dos
+pedidos a la vez**: retira uno, viaja, entrega, y solo entonces vuelve por
+el próximo.
 
-La navegación usa la interfaz **`Navegador`** (`irA(nombrePanel)` / `volver()`), implementada por `VentanaPrincipal` con una pila de historial: "Volver" siempre regresa a la pantalla anterior real (por ejemplo, desde Asignación Manual vuelve a Asignación, no directo al menú). Como los paneles se crean una sola vez y se reutilizan, cada uno expone un método público de refresco (`actualizarDatos()`, `actualizarFormulario()`, `actualizarListaPendientes()`) que se invoca justo antes de mostrarlo, para reflejar cambios hechos en otras pantallas.
+Toda la salida de estos hilos (`System.out`/`System.err`) se redirige a la
+consola visual de Swing (`ConsolaSwingOutputStream`), que decodifica los
+bytes como UTF-8 respetando los límites de línea (evita que tildes/ñ se
+corrompan al mezclarse con la escritura concurrente de varios hilos).
 
 ---
 
-## Componentes clave
+## Persistencia (base de datos)
 
-| Clase | Responsabilidad |
+El proyecto usa **JDBC puro** (sin frameworks ORM) contra una base de datos
+**MySQL** llamada `speedfast_db`. Los scripts SQL están en `resources/`:
+
+| Script | Uso |
 |---|---|
-| `SpeedFast` | Punto de entrada de consola; orquesta el orden de las 5 fases del sistema. |
-| `SpeedFastGUI` | Punto de entrada de la interfaz gráfica; lanza `VentanaPrincipal`. |
-| `VentanaPrincipal` | Único `JFrame` de la GUI; mantiene el estado de sesión y administra la navegación entre paneles vía `CardLayout`. |
-| `GestorFases` | Contiene la lógica de cada fase (asignación, despacho, cancelaciones, ejecución de rutas, reportes) para la versión de consola. |
-| `GestorInstancias` | Carga `pedidos.txt` (por reflexión) y `repartidores.txt` desde disco. |
-| `GestorArchivoPedidos` | Soporte de la GUI: calcula el próximo ID correlativo por tipo y agrega nuevas líneas a `pedidos.txt`. |
-| `ControladorEnvios` | Filtra repartidores elegibles y lleva el historial de entregas exitosas. |
-| `ZonaCarga` | Pool compartido y sincronizado (`ArrayList` + `BlockingQueue`) desde donde cada repartidor retira, en una sola visita, toda su carga de pedidos `CONFIRMADO`s. |
-| `Repartidor` | Corre en su propio hilo; retira su carga de la `ZonaCarga`, sale a ruta, entrega cada pedido y vuelve por una carga nueva hasta que no quede nada disponible. Mochila de capacidad fija: máximo 5 pedidos (`Pedido[5]`). |
-| `HiloEntrega` | Simula, en un hilo real, las etapas de una entrega individual con tiempos de espera aleatorios. |
+| `schema_speedfast.sql` | Crea la base de datos y las 3 tablas desde cero. |
+| `migracion_alter_tablas.sql` | Migra un esquema simple preexistente al esquema extendido (agrega columnas). |
+| `datos_iniciales.sql` | Carga de datos de ejemplo (15 pedidos, 30 repartidores). |
+
+### Tablas
+
+- **Repartidor**: `id_repartidor`, `rut` (clave de negocio, único),
+  `nombre`, `vehiculo`, `telefono`, `tipo_servicio`,
+  `tiene_mochila_termica`, `capacidad_peso_max`, `esta_cerca_ubicacion`.
+- **Pedido**: `id_pedido`, `codigo_pedido` (clave de negocio, único),
+  `tipo_pedido`, `descripcion`, `direccion_destino`, `distancia_km`,
+  `peso_kg`, `estado`, `motivo_cancelacion`, `id_repartidor_asignado` (FK).
+- **Entrega**: historial de entregas — `id_pedido` (FK), `id_repartidor`
+  (FK), `fecha_entrega`, `estado_entrega`.
+
+### Capa DAO (`data.persistence`)
+
+- `ConexionBD`: punto único de conexión (`DriverManager` + URL/usuario/clave).
+  Expone `verificarConexion()`, usado al arrancar la GUI para mostrar un
+  diálogo de error claro si la base no está disponible (en vez de que la
+  aplicación abra "vacía" sin explicación).
+- `RepartidorDAO`: `listarTodos()` e `insertar(Repartidor)`.
+- `PedidoDAO`: `listarTodos(repartidores)`, `insertar(Pedido)`,
+  `actualizarEstado(Pedido)`.
+- `EntregaDAO`: `registrarEntrega(...)` y
+  `contarEntregasHoyPorRepartidor()` (usado en la nómina para mostrar
+  cuántas entregas hizo cada repartidor durante el día).
+
+Las relaciones se resuelven por **clave de negocio** (`rut`,
+`codigo_pedido`) mediante subconsultas SQL, en vez de exponer los IDs
+autoincrementales de la base de datos dentro del modelo de dominio Java.
+
+> **Requisito para ejecutar:** MySQL corriendo localmente, con la base
+> `speedfast_db` creada (`schema_speedfast.sql` + `datos_iniciales.sql`), y
+> el driver `mysql-connector-j` agregado como librería del proyecto. Ajusta
+> usuario/clave en `ConexionBD.java`.
 
 ---
 
-## Ejecución (versión de consola)
+## Interfaz gráfica (Swing)
 
-Para la versión gráfica, ver la sección "Interfaz Gráfica (GUI)" más arriba.
+La navegación usa un `CardLayout` central (`VentanaPrincipal`), con un
+historial (`ArrayDeque<String>`) que permite "volver" a la pantalla
+anterior. Los paneles principales son:
 
-1. `SpeedFast` carga los pedidos y repartidores desde `resources/`.
-2. **Fase 1**: se asignan repartidores (automática, manual o nominal) — los pedidos pasan a `CONFIRMADO` e ingresan a la `ZonaCarga`.
-3. **Fase 2**: se muestra el resumen y se despachan los pedidos con repartidor asignado.
-4. **Fase 3**: ventana de cancelaciones tardías (excepción exclusiva de `PedidoComida`).
-5. **Fase 4**: un `ExecutorService` lanza un hilo por repartidor; cada uno retira su carga de la `ZonaCarga`, entrega sus pedidos (`EN_REPARTO` → `ENTREGADO`) y vuelve por más hasta agotar el pool.
-6. **Fase 5**: se registra el historial de entregas exitosas y se muestra el total de pedidos entregados correctamente.
+| Panel | Función |
+|---|---|
+| `PanelMenuPrincipal` | Menú principal con acceso a las demás secciones. |
+| `PanelAgregarPedido` | Formulario para registrar un nuevo pedido. |
+| `PanelZonaCarga` | Lista/filtra todos los pedidos registrados. |
+| `PanelAsignacion` | Asignación **automática** de pedidos a repartidores. |
+| `PanelAsignacionManual` | Asignación **manual**, elegida por el usuario. |
+| `PanelEjecucionHilos` | Consola en vivo de la ejecución de entregas (colores por estado). |
+| `PanelGestionRepartidores` | Nómina de repartidores, entregas del día y alta de nuevos repartidores. |
+
+La ejecución de hilos (`PanelEjecucionHilos`) **solo** se puede iniciar
+después de completar una asignación (manual o automática) exitosa, mediante
+el botón "Realizar Entregas ➜" que aparece en el diálogo de confirmación.
+
+---
+
+## Cómo ejecutar el proyecto
+
+1. Instalar y levantar MySQL localmente.
+2. Ejecutar `resources/schema_speedfast.sql` y luego
+   `resources/datos_iniciales.sql` (o `migracion_alter_tablas.sql` si ya
+   tenías un esquema simple previo).
+3. Ajustar usuario/clave en `data/persistence/ConexionBD.java` si es
+   necesario.
+4. Agregar el driver `mysql-connector-j-x.x.x.jar` como librería del
+   proyecto (IntelliJ: *File → Project Structure → Libraries → "+"*).
+5. Ejecutar `app.SpeedFastGUI` (interfaz gráfica) o `app.SpeedFast`
+   (versión por consola).
+
+---
+
+## Estructura de carpetas
+
+```
+src/
+├── app/
+│   ├── SpeedFast.java          # Punto de entrada por consola
+│   └── SpeedFastGUI.java       # Punto de entrada de la interfaz gráfica
+├── data/
+│   ├── enumerate/              # EstadoPedido, TipoPedido, TipoServicio
+│   ├── persistence/            # ConexionBD, RepartidorDAO, PedidoDAO, EntregaDAO
+│   └── util/                   # ControladorEnvios, GestorFases, GestorArchivoPedidos
+├── model/
+│   ├── core/                   # Pedido (abstracta), Persona
+│   ├── entities/
+│   │   ├── business/           # ZonaCarga
+│   │   ├── dealer/             # Repartidor
+│   │   └── order/               # PedidoComida, PedidoEncomienda, PedidoExpress
+│   ├── interfaces/              # IDespachable, ICancelable, IRastreable, IRunnable
+│   └── valueobjects/            # HiloEntrega
+└── ui/                          # Ventanas y paneles Swing
+resources/                       # Scripts SQL y archivos .txt originales (legado)
+```
+
+---
+
+## Limitaciones conocidas
+
+- El flujo por **consola** (`app.SpeedFast` / `GestorFases`) no persiste en
+  la base de datos los cambios de estado durante la asignación/cancelación
+  ni las entregas — solo la carga inicial usa la base de datos. Esta lógica
+  sí está completamente integrada en el flujo de la **interfaz gráfica**.
+- `resources/pedidos.txt` y `resources/repartidores.txt` se mantienen solo
+  como referencia histórica; ya no son leídos por la aplicación (fueron
+  reemplazados por la base de datos).

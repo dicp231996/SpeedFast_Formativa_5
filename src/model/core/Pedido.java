@@ -8,8 +8,6 @@ import model.interfaces.IRastreable;
 
 public abstract class Pedido implements IDespachable, ICancelable, IRastreable {
 
-    // Contador estático compartido por todas las instancias: genera el
-    // correlativo interno de manera automática cada vez que se crea un Pedido.
     private static int contadorId = 1;
 
     private final int id;
@@ -20,11 +18,9 @@ public abstract class Pedido implements IDespachable, ICancelable, IRastreable {
 
     protected Repartidor repartidorAsignado;
 
-    // Nuevas variables internas para encapsular la interfaz ICancelable
     protected boolean estadoCancelado;
     protected String motivoCancelacion;
 
-    // Estado operativo del pedido dentro de su ciclo de vida (PENDIENTE, CONFIRMADO, EN_REPARTO, ENTREGADO)
     protected EstadoPedido estado;
 
     public Pedido() {
@@ -94,24 +90,36 @@ public abstract class Pedido implements IDespachable, ICancelable, IRastreable {
 
     // =========================================================
     // ACTUALIZACIÓN CONTROLADA DEL ESTADO DEL PEDIDO
-    // Punto único de entrada para ir avanzando el pedido a través de su
-    // ciclo de vida (PENDIENTE -> CONFIRMADO -> EN_REPARTO -> ENTREGADO) durante la
-    // ejecución del programa, dejando trazabilidad del cambio en consola.
     // =========================================================
     public void nuevoEstado(EstadoPedido estado) {
         if (this.estado == estado) {
-            return; // Sin cambios reales, evitamos ruido en el log
+            return;
         }
         System.out.println("-> [ESTADO] Pedido " + this.idPedido + ": " + this.estado.name() +
                 " => " + estado.name());
         this.estado = estado;
     }
 
-    // =========================================================
-    // MARCA EL PEDIDO COMO ENTREGADO (invocado al finalizar HiloEntrega)
-    // =========================================================
     public void marcarEntregado() {
         this.nuevoEstado(EstadoPedido.ENTREGADO);
+    }
+
+    // =========================================================
+    // REHIDRATACIÓN DESDE LA BASE DE DATOS
+    // =========================================================
+    // A diferencia de nuevoEstado(...), estos métodos NO imprimen ningún
+    // mensaje de transición: se usan únicamente cuando PedidoDAO reconstruye
+    // un Pedido que ya existía en la base de datos (por ejemplo, uno que
+    // había quedado CONFIRMADO o CANCELADO en una ejecución anterior), y no
+    // corresponde simular una transición de estado que en realidad ya
+    // ocurrió antes de que la aplicación se reiniciara.
+    public void restaurarEstado(EstadoPedido estado) {
+        this.estado = estado;
+    }
+
+    public void restaurarCancelacion(String motivo) {
+        this.estadoCancelado = true;
+        this.motivoCancelacion = (motivo != null) ? motivo : "N/A";
     }
 
     // =========================================================
@@ -137,7 +145,6 @@ public abstract class Pedido implements IDespachable, ICancelable, IRastreable {
 
     @Override
     public Repartidor cancelar(String motivo) {
-        // Regla base: Ningún pedido general se puede cancelar si ya se asignó
         if (this.repartidorAsignado == null) {
             this.estadoCancelado = true;
             this.motivoCancelacion = motivo;

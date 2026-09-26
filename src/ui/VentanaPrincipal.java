@@ -1,13 +1,16 @@
 package ui;
 
+import data.persistence.ConexionBD;
+import data.persistence.PedidoDAO;
+import data.persistence.RepartidorDAO;
 import data.util.ControladorEnvios;
-import data.util.GestorInstancias;
 import model.core.Pedido;
 import model.entities.business.ZonaCarga;
 import model.entities.dealer.Repartidor;
 
 import javax.swing.*;
 import java.awt.*;
+import java.sql.SQLException;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -19,9 +22,8 @@ public class VentanaPrincipal extends JFrame implements Navegador {
     public static final String ZONA_CARGA = "zonaCarga";
     public static final String ASIGNACION = "asignacion";
     public static final String ASIGNACION_MANUAL = "asignacionManual";
-
-    private final String rutaPedidos = "resources/pedidos.txt";
-    private final String rutaRepartidores = "resources/repartidores.txt";
+    public static final String EJECUCION = "ejecucion";
+    public static final String REPARTIDORES = "repartidores";
 
     private final ArrayList<Pedido> listaPedidos;
     private final ArrayList<Repartidor> listaRepartidores;
@@ -35,17 +37,38 @@ public class VentanaPrincipal extends JFrame implements Navegador {
     private PanelAgregarPedido panelAgregarPedido;
     private PanelZonaCarga panelZonaCarga;
     private PanelAsignacionManual panelAsignacionManual;
+    private PanelEjecucionHilos panelEjecucionHilos;
+    private PanelGestionRepartidores panelGestionRepartidores;
 
     public VentanaPrincipal() {
         super("SpeedFast - Sistema de Gestión de Despachos");
 
-        this.listaPedidos = GestorInstancias.cargarPedidos(rutaPedidos);
-        this.listaRepartidores = GestorInstancias.cargarRepartidores(rutaRepartidores);
+        // Antes de intentar cargar nada, se verifica la conexión a la base
+        // de datos por separado: RepartidorDAO/PedidoDAO atrapan cualquier
+        // SQLException y devuelven listas vacías (para no tumbar la GUI), lo
+        // que hace que un error de conexión se vea como "no cargó nada" sin
+        // explicación. Aquí sí dejamos que el error real llegue y se lo
+        // mostramos al usuario en un diálogo antes de seguir.
+        try {
+            ConexionBD.verificarConexion();
+        } catch (SQLException e) {
+            JOptionPane.showMessageDialog(null,
+                    "No se pudo conectar a la base de datos 'speedfast_db'.\n\n"
+                            + "Motivo: " + e.getMessage()
+                            + "\n\nRevisa en ConexionBD.java: que MySQL esté corriendo, que la base "
+                            + "y las tablas existan (schema_speedfast.sql), y que el usuario/clave "
+                            + "sean correctos. La aplicación seguirá abriendo, pero sin pedidos ni "
+                            + "repartidores cargados.",
+                    "Error de conexión a la base de datos", JOptionPane.ERROR_MESSAGE);
+        }
+
+        // Reemplaza la lectura de pedidos.txt/repartidores.txt: ambas listas
+        // se cargan ahora directamente desde la base de datos speedfast_db.
+        this.listaRepartidores = new RepartidorDAO().listarTodos();
+        this.listaPedidos = new PedidoDAO().listarTodos(listaRepartidores);
         this.zonaCarga = new ZonaCarga();
         this.controlador = new ControladorEnvios();
 
-        // Registramos en la Zona de Carga todos los pedidos ya existentes en
-        // el archivo (quedan PENDIENTE hasta que se ejecute la asignación).
         for (Pedido pedido : listaPedidos) {
             zonaCarga.agregarPedido(pedido);
         }
@@ -59,21 +82,25 @@ public class VentanaPrincipal extends JFrame implements Navegador {
 
     private void construirInterfaz() {
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        setSize(760, 520);
+        setSize(820, 560);
         setLocationRelativeTo(null);
         setResizable(true);
 
         PanelMenuPrincipal panelMenu = new PanelMenuPrincipal(this);
-        panelAgregarPedido = new PanelAgregarPedido(this, listaPedidos, zonaCarga, rutaPedidos);
+        panelAgregarPedido = new PanelAgregarPedido(this, listaPedidos, zonaCarga);
         panelZonaCarga = new PanelZonaCarga(zonaCarga, this);
-        panelAsignacionManual = new PanelAsignacionManual(this, listaPedidos, listaRepartidores, controlador, zonaCarga);
-        PanelAsignacion panelAsignacion = new PanelAsignacion(this, listaPedidos, listaRepartidores, zonaCarga);
+        panelEjecucionHilos = new PanelEjecucionHilos(this, listaPedidos, zonaCarga, controlador);
+        panelAsignacionManual = new PanelAsignacionManual(this, listaPedidos, listaRepartidores, controlador, zonaCarga, panelEjecucionHilos);
+        PanelAsignacion panelAsignacion = new PanelAsignacion(this, listaPedidos, listaRepartidores, zonaCarga, panelEjecucionHilos);
+        panelGestionRepartidores = new PanelGestionRepartidores(this, listaRepartidores);
 
         panelContenedor.add(panelMenu, MENU);
         panelContenedor.add(panelAgregarPedido, AGREGAR);
         panelContenedor.add(panelZonaCarga, ZONA_CARGA);
         panelContenedor.add(panelAsignacion, ASIGNACION);
         panelContenedor.add(panelAsignacionManual, ASIGNACION_MANUAL);
+        panelContenedor.add(panelEjecucionHilos, EJECUCION);
+        panelContenedor.add(panelGestionRepartidores, REPARTIDORES);
 
         setContentPane(panelContenedor);
 
@@ -81,8 +108,6 @@ public class VentanaPrincipal extends JFrame implements Navegador {
         cardLayout.show(panelContenedor, MENU);
     }
 
-    // Navega hacia adelante: apila el panel actual antes de mostrar el nuevo,
-    // para que "volver()" sepa a cuál regresar.
     @Override
     public void irA(String nombrePanel) {
         refrescarPanel(nombrePanel);
@@ -90,9 +115,6 @@ public class VentanaPrincipal extends JFrame implements Navegador {
         cardLayout.show(panelContenedor, nombrePanel);
     }
 
-    // Descarta el panel actual de la pila y muestra el que quedó como tope
-    // (el que se estaba viendo justo antes). Si ya estamos en el menú
-    // principal (base de la pila), no hace nada.
     @Override
     public void volver() {
         if (historial.size() <= 1) {
@@ -104,10 +126,6 @@ public class VentanaPrincipal extends JFrame implements Navegador {
         cardLayout.show(panelContenedor, anterior);
     }
 
-    // Antes de mostrar ciertos paneles, refrescamos su contenido para que
-    // reflejen cualquier cambio hecho desde la última vez que se vieron
-    // (nuevos pedidos agregados, asignaciones realizadas, etc.), ya que al
-    // usar CardLayout cada panel se crea una sola vez y se reutiliza.
     private void refrescarPanel(String nombrePanel) {
         if (ZONA_CARGA.equals(nombrePanel)) {
             panelZonaCarga.actualizarDatos();
@@ -115,6 +133,10 @@ public class VentanaPrincipal extends JFrame implements Navegador {
             panelAgregarPedido.actualizarFormulario();
         } else if (ASIGNACION_MANUAL.equals(nombrePanel)) {
             panelAsignacionManual.actualizarListaPendientes();
+        } else if (EJECUCION.equals(nombrePanel)) {
+            panelEjecucionHilos.actualizarEstadoBoton();
+        } else if (REPARTIDORES.equals(nombrePanel)) {
+            panelGestionRepartidores.actualizarDatos();
         }
     }
 }

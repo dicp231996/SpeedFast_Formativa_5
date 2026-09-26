@@ -1,16 +1,19 @@
 package model.valueobjects;
 
+import data.persistence.EntregaDAO;
+import data.persistence.PedidoDAO;
 import model.core.Pedido;
 
 import java.util.concurrent.ThreadLocalRandom;
 
 public class HiloEntrega implements Runnable {
 
-    // Rango (en milisegundos) dentro del cual se sortea la duración de cada etapa
     private static final int ESPERA_MINIMA_MS = 1000;
     private static final int ESPERA_MAXIMA_MS = 3000;
 
     private Pedido pedido;
+    private final PedidoDAO pedidoDAO = new PedidoDAO();
+    private final EntregaDAO entregaDAO = new EntregaDAO();
 
     public HiloEntrega(Pedido pedido) {
         this.pedido = pedido;
@@ -31,14 +34,17 @@ public class HiloEntrega implements Runnable {
             System.out.println("[" + pedido.getIdPedido() + "] Tu pedido ha sido entregado con éxito.");
             pedido.marcarEntregado();
 
+            // Persiste el estado ENTREGADO y deja la traza en la tabla
+            // Entrega, reemplazando lo que antes solo quedaba en memoria.
+            pedidoDAO.actualizarEstado(pedido);
+            entregaDAO.registrarEntrega(pedido, pedido.getRepartidorAsignado(), "ENTREGADO");
+
         } catch (InterruptedException e) {
             System.err.println("-> Alerta: La simulación del pedido " + pedido.getIdPedido() + " fue interrumpida.");
             Thread.currentThread().interrupt();
         }
     }
 
-    // Genera una espera aleatoria distinta para cada etapa del recorrido,
-    // simulando tiempos de traslado variables entre pedidos y repartidores.
     private int tiempoAleatorio() {
         return ThreadLocalRandom.current().nextInt(ESPERA_MINIMA_MS, ESPERA_MAXIMA_MS + 1);
     }

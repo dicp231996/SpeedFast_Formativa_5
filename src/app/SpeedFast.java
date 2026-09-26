@@ -1,33 +1,38 @@
 package app;
 
+import data.persistence.PedidoDAO;
+import data.persistence.RepartidorDAO;
 import data.util.ControladorEnvios;
 import data.util.GestorFases;
-import data.util.GestorInstancias;
 import model.core.Pedido;
 import model.entities.business.ZonaCarga;
 import model.entities.dealer.Repartidor;
 
+import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Scanner;
 
 public class SpeedFast {
 
     public static void main(String[] args) {
-        Scanner scanner = new Scanner(System.in);
-        String rutaPedidos = "resources/pedidos.txt";
-        String rutaRepartidores = "resources/repartidores.txt";
+        // Ver comentario equivalente en SpeedFastGUI.main: fuerza UTF-8 en
+        // consola para que tildes/ñ no se corrompan según el charset por
+        // defecto de la plataforma.
+        System.setOut(new PrintStream(System.out, true, StandardCharsets.UTF_8));
+        System.setErr(new PrintStream(System.err, true, StandardCharsets.UTF_8));
+
+        Scanner scanner = new Scanner(System.in, StandardCharsets.UTF_8);
 
         System.out.println("=========================================");
         System.out.println("       INICIANDO SISTEMA SPEEDFAST       ");
         System.out.println("=========================================\n");
 
-        ArrayList<Pedido> listaPedidos = GestorInstancias.cargarPedidos(rutaPedidos);
-        ArrayList<Repartidor> listaRepartidores = GestorInstancias.cargarRepartidores(rutaRepartidores);
+        // Reemplaza la lectura de pedidos.txt/repartidores.txt: ambas listas
+        // se cargan ahora directamente desde la base de datos speedfast_db.
+        ArrayList<Repartidor> listaRepartidores = new RepartidorDAO().listarTodos();
+        ArrayList<Pedido> listaPedidos = new PedidoDAO().listarTodos(listaRepartidores);
         ControladorEnvios controlador = new ControladorEnvios();
-
-        // Zona de Carga única, compartida entre la Fase 1 (donde los pedidos
-        // se registran y se encolan al quedar CONFIRMADOS) y la Fase 4 (donde
-        // los repartidores compiten por retirarlos).
         ZonaCarga zonaCarga = new ZonaCarga();
 
         GestorFases.ejecutarFaseAsignacion(listaPedidos, listaRepartidores, controlador, scanner, zonaCarga);

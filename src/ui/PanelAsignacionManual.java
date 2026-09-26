@@ -1,6 +1,7 @@
 package ui;
 
 import data.enumerate.EstadoPedido;
+import data.persistence.PedidoDAO;
 import data.util.ControladorEnvios;
 import model.core.Pedido;
 import model.entities.business.ZonaCarga;
@@ -17,20 +18,25 @@ public class PanelAsignacionManual extends JPanel {
     private final ArrayList<Repartidor> listaRepartidores;
     private final ControladorEnvios controlador;
     private final ZonaCarga zonaCarga;
+    private final PanelEjecucionHilos panelEjecucionHilos;
+    private final PedidoDAO pedidoDAO = new PedidoDAO();
+    private Navegador navegador;
 
     private JComboBox<Pedido> comboPedidosPendientes;
     private JLabel etiquetaEstado;
 
     public PanelAsignacionManual(Navegador navegador, ArrayList<Pedido> listaPedidos, ArrayList<Repartidor> listaRepartidores,
-                                 ControladorEnvios controlador, ZonaCarga zonaCarga) {
+                                 ControladorEnvios controlador, ZonaCarga zonaCarga, PanelEjecucionHilos panelEjecucionHilos) {
         this.listaPedidos = listaPedidos;
         this.listaRepartidores = listaRepartidores;
         this.controlador = controlador;
         this.zonaCarga = zonaCarga;
+        this.panelEjecucionHilos = panelEjecucionHilos;
         construirInterfaz(navegador);
     }
 
     private void construirInterfaz(Navegador navegador) {
+        this.navegador = navegador;
         setLayout(new BorderLayout());
 
         JLabel titulo = new JLabel("Asignación Manual", SwingConstants.CENTER);
@@ -38,7 +44,6 @@ public class PanelAsignacionManual extends JPanel {
         titulo.setBorder(BorderFactory.createEmptyBorder(15, 0, 5, 0));
 
         comboPedidosPendientes = new JComboBox<>();
-        // Renderer simple para mostrar id + tipo + dirección en vez del toString por defecto.
         comboPedidosPendientes.setRenderer(new DefaultListCellRenderer() {
             @Override
             public Component getListCellRendererComponent(JList<?> list, Object value, int index,
@@ -80,9 +85,6 @@ public class PanelAsignacionManual extends JPanel {
         actualizarListaPendientes();
     }
 
-    // Se invoca cada vez que se vuelve a mostrar este panel (ver
-    // VentanaPrincipal.refrescarPanel), para reflejar asignaciones hechas
-    // desde la última vez (automática o manual).
     public void actualizarListaPendientes() {
         comboPedidosPendientes.removeAllItems();
         int pendientes = 0;
@@ -124,7 +126,7 @@ public class PanelAsignacionManual extends JPanel {
                 "Repartidores elegibles", JOptionPane.QUESTION_MESSAGE, null, opciones, opciones[0]);
 
         if (seleccion == null) {
-            return; // El usuario canceló
+            return;
         }
 
         int indice = Arrays.asList(opciones).indexOf(seleccion);
@@ -132,12 +134,20 @@ public class PanelAsignacionManual extends JPanel {
 
         pedidoSeleccionado.asignarRepartidor(elegido);
         elegido.agregarPedido(pedidoSeleccionado);
-        zonaCarga.agregarPedido(pedidoSeleccionado); // ahora CONFIRMADO: se habilita para retiro
+        zonaCarga.agregarPedido(pedidoSeleccionado);
+        pedidoDAO.actualizarEstado(pedidoSeleccionado); // persiste CONFIRMADO + repartidor asignado
 
-        JOptionPane.showMessageDialog(this,
+        String[] opcionesExito = { "Aceptar", "Realizar Entregas ➜" };
+        int opcion = JOptionPane.showOptionDialog(this,
                 "Pedido " + pedidoSeleccionado.getIdPedido() + " asignado a " + elegido.getNombreCompleto() + ".",
-                "Asignación exitosa", JOptionPane.INFORMATION_MESSAGE);
+                "Asignación exitosa", JOptionPane.DEFAULT_OPTION, JOptionPane.INFORMATION_MESSAGE,
+                null, opcionesExito, opcionesExito[0]);
 
         actualizarListaPendientes();
+
+        if (opcion == 1) {
+            navegador.irA(VentanaPrincipal.EJECUCION);
+            panelEjecucionHilos.iniciarEjecucion();
+        }
     }
 }
