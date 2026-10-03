@@ -181,9 +181,17 @@ El proyecto usa **JDBC puro** (sin frameworks ORM) contra una base de datos
 | `migracion_alter_tablas.sql` | Migra un esquema simple preexistente al esquema extendido (agrega columnas). |
 | `migracion_pedidos_entregados.sql` | Agrega la tabla `PedidoEntregado` (historial) a una base ya existente. |
 | `migracion_clientes.sql` | Agrega la tabla `Cliente` y la columna `Pedido.id_cliente` a una base ya existente, con 10 clientes de ejemplo. |
+| `migracion_cliente_en_entregados.sql` | Agrega las columnas `rut_cliente`/`nombre_cliente` a una tabla `PedidoEntregado` ya existente (creada antes de que el historial guardara el cliente). |
 | `datos_iniciales.sql` | Carga de datos de ejemplo (15 pedidos, 30 repartidores). |
+| `datos_prueba_pedidos_con_clientes.sql` | 30 pedidos de prueba (10 de cada tipo), cada uno ya asociado a uno de los 10 clientes de ejemplo. |
 | `reset_datos_prueba.sql` | Vacía `Pedido`/`Entrega`/`PedidoEntregado` y carga 30 pedidos de prueba nuevos (reseteo completo). |
 | `reset_solo_pedidos.sql` | Igual que el anterior pero sin tocar `PedidoEntregado` (conserva el historial). |
+
+> **Entrega del proyecto:** la base de datos se entrega como estos scripts
+> `.sql` sueltos dentro de `resources/` (no como un dump único), tal como
+> están. La sección [Cómo ejecutar el proyecto](#cómo-ejecutar-el-proyecto)
+> indica el orden exacto en que deben ejecutarse para dejar la base de datos
+> igual a la usada en el desarrollo.
 
 ### Tablas
 
@@ -204,8 +212,9 @@ El proyecto usa **JDBC puro** (sin frameworks ORM) contra una base de datos
   éxito**, pensado para la pestaña "Pedidos Entregados" y para métricas
   futuras. A propósito es una tabla **denormalizada** (sin llaves foráneas):
   guarda una copia de `codigo_pedido`, `tipo_pedido`, `direccion_destino`,
-  `distancia_km`, `peso_kg`, `rut_repartidor` y `nombre_repartidor` como
-  texto plano, más `fecha_entrega` (con índice dedicado). Así:
+  `distancia_km`, `peso_kg`, `rut_repartidor`/`nombre_repartidor` y
+  `rut_cliente`/`nombre_cliente` como texto plano, más `fecha_entrega` (con
+  índice dedicado). Así:
   - Las consultas por fecha (o las métricas que se agreguen más adelante)
     no necesitan hacer `JOIN` con `Pedido`/`Repartidor`.
   - El historial sobrevive intacto aunque el pedido o el repartidor
@@ -378,17 +387,48 @@ aplicación no se cierre.
 
 ## Cómo ejecutar el proyecto
 
+> **Nota sobre la entrega:** la base de datos se entrega como los scripts
+> `.sql` sueltos de `resources/` (no como un dump/backup único). Quien reciba
+> el proyecto debe crear la base de datos ejecutando esos scripts **en el
+> orden indicado abajo**, en su propia instancia de MySQL.
+
+### A) Base de datos nueva (caso normal: clonar el proyecto desde cero)
+
 1. Instalar y levantar MySQL localmente.
-2. Ejecutar `resources/schema_speedfast.sql` y luego
-   `resources/datos_iniciales.sql` (o `migracion_alter_tablas.sql` si ya
-   tenías un esquema simple previo). Si tu base ya existía antes de que se
-   agregara la entidad `Cliente`, corre además `migracion_clientes.sql`.
-3. Ajustar usuario/clave en `data/persistence/ConexionBD.java` si es
-   necesario.
+2. Ejecutar, en este orden, con un cliente MySQL (consola, Workbench, el
+   plugin de MySQL de IntelliJ, etc.):
+  1. `resources/schema_speedfast.sql` — crea la base `speedfast_db` y las
+     5 tablas ya actualizadas (incluye `Cliente` y las columnas de cliente
+     en `PedidoEntregado`).
+  2. `resources/migracion_clientes.sql` — carga los 10 clientes de ejemplo
+     (necesarios para los pedidos de prueba del siguiente paso).
+  3. `resources/datos_prueba_pedidos_con_clientes.sql` — carga 30 pedidos
+     de prueba, cada uno ya asociado a un cliente.
+3. Ajustar usuario/clave en `data/persistence/ConexionBD.java` según tu
+   instalación de MySQL.
 4. Agregar el driver `mysql-connector-j-x.x.x.jar` como librería del
    proyecto (IntelliJ: *File → Project Structure → Libraries → "+"*).
 5. Ejecutar `app.SpeedFastGUI` (interfaz gráfica) o `app.SpeedFast`
    (versión por consola).
+
+### B) Ya tenías una base de datos de una versión anterior del proyecto
+
+Ejecuta solo los scripts de migración que correspondan a lo que te falte,
+en este orden:
+
+1. `migracion_alter_tablas.sql` — si tu base venía del esquema simple
+   original (antes de `Entrega`/`PedidoEntregado`).
+2. `migracion_pedidos_entregados.sql` — si te falta la tabla
+   `PedidoEntregado` (historial de entregas).
+3. `migracion_clientes.sql` — si te falta la tabla `Cliente` y la columna
+   `Pedido.id_cliente`.
+4. `migracion_cliente_en_entregados.sql` — si ya tenías `PedidoEntregado`
+   pero sin las columnas `rut_cliente`/`nombre_cliente` (es decir, si
+   ejecutaste el script del punto 2 antes de que existiera `Cliente`).
+
+Cada script de migración es idempotente en la práctica (usa
+`CREATE TABLE IF NOT EXISTS` o columnas nuevas), pero están pensados para
+ejecutarse **una sola vez** cada uno.
 
 ---
 

@@ -4,6 +4,7 @@ import data.persistence.EntregaDAO;
 import data.persistence.PedidoDAO;
 import data.persistence.PedidoEntregadoDAO;
 import model.core.Pedido;
+import model.entities.client.Cliente;
 
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -24,16 +25,16 @@ public class HiloEntrega implements Runnable {
     @Override
     public void run() {
         try {
-            System.out.println("[" + pedido.getIdPedido() + "] Tu repartidor está en el punto de recogida.");
+            System.out.println(prefijo() + "Tu repartidor está en el punto de recogida.");
             Thread.sleep(tiempoAleatorio());
 
-            System.out.println("[" + pedido.getIdPedido() + "] Tu pedido está en ruta.");
+            System.out.println(prefijo() + "Tu pedido está en ruta.");
             Thread.sleep(tiempoAleatorio());
 
-            System.out.println("[" + pedido.getIdPedido() + "] Ya casi está en tus manos.");
+            System.out.println(prefijo() + "Ya casi está en tus manos.");
             Thread.sleep(tiempoAleatorio());
 
-            System.out.println("[" + pedido.getIdPedido() + "] Tu pedido ha sido entregado con éxito.");
+            System.out.println(prefijo() + "Tu pedido ha sido entregado con éxito.");
             pedido.marcarEntregado();
 
             // Persiste el estado ENTREGADO, deja la traza en la tabla
@@ -53,5 +54,16 @@ public class HiloEntrega implements Runnable {
 
     private int tiempoAleatorio() {
         return ThreadLocalRandom.current().nextInt(ESPERA_MINIMA_MS, ESPERA_MAXIMA_MS + 1);
+    }
+
+    // Prefijo común de cada línea de la consola de ejecución: identifica el
+    // pedido y, cuando el pedido tiene un cliente asociado, también a quién
+    // va dirigida la entrega, para que PanelEjecucionHilos (que solo
+    // redirige System.out) muestre la traza completa sin tener que conocer
+    // el modelo de dominio.
+    private String prefijo() {
+        Cliente cliente = pedido.getCliente();
+        String nombreCliente = cliente != null ? cliente.getNombreCompleto() : "N/D";
+        return "[" + pedido.getIdPedido() + " | Cliente: " + nombreCliente + "] ";
     }
 }

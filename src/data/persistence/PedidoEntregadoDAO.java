@@ -1,6 +1,7 @@
 package data.persistence;
 
 import model.core.Pedido;
+import model.entities.client.Cliente;
 import model.entities.dealer.Repartidor;
 import model.entities.order.PedidoEncomienda;
 import model.historial.RegistroPedidoEntregado;
@@ -31,10 +32,11 @@ public class PedidoEntregadoDAO {
     public void registrar(Pedido pedido) {
         Double peso = (pedido instanceof PedidoEncomienda) ? ((PedidoEncomienda) pedido).getPesoKg() : null;
         Repartidor repartidor = pedido.getRepartidorAsignado();
+        Cliente cliente = pedido.getCliente();
 
         String sql = "INSERT INTO PedidoEntregado (codigo_pedido, tipo_pedido, direccion_destino, "
-                + "distancia_km, peso_kg, rut_repartidor, nombre_repartidor, fecha_entrega) "
-                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+                + "distancia_km, peso_kg, rut_repartidor, nombre_repartidor, rut_cliente, nombre_cliente, fecha_entrega) "
+                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
         try (Connection conexion = ConexionBD.obtenerConexion();
              PreparedStatement ps = conexion.prepareStatement(sql)) {
@@ -58,7 +60,15 @@ public class PedidoEntregadoDAO {
                 ps.setNull(7, Types.VARCHAR);
             }
 
-            ps.setTimestamp(8, Timestamp.valueOf(LocalDateTime.now()));
+            if (cliente != null) {
+                ps.setString(8, cliente.getRut());
+                ps.setString(9, cliente.getNombreCompleto());
+            } else {
+                ps.setNull(8, Types.VARCHAR);
+                ps.setNull(9, Types.VARCHAR);
+            }
+
+            ps.setTimestamp(10, Timestamp.valueOf(LocalDateTime.now()));
 
             ps.executeUpdate();
 
@@ -127,6 +137,8 @@ public class PedidoEntregadoDAO {
                 pesoKg,
                 rs.getString("rut_repartidor"),
                 rs.getString("nombre_repartidor"),
+                rs.getString("rut_cliente"),
+                rs.getString("nombre_cliente"),
                 rs.getTimestamp("fecha_entrega").toLocalDateTime()
         );
     }
@@ -192,8 +204,8 @@ public class PedidoEntregadoDAO {
     // inserción falló.
     public RegistroPedidoEntregado insertarDesdeRegistro(RegistroPedidoEntregado registro) {
         String sql = "INSERT INTO PedidoEntregado (codigo_pedido, tipo_pedido, direccion_destino, "
-                + "distancia_km, peso_kg, rut_repartidor, nombre_repartidor, fecha_entrega) "
-                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+                + "distancia_km, peso_kg, rut_repartidor, nombre_repartidor, rut_cliente, nombre_cliente, fecha_entrega) "
+                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
         try (Connection conexion = ConexionBD.obtenerConexion();
              PreparedStatement ps = conexion.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
@@ -209,7 +221,9 @@ public class PedidoEntregadoDAO {
             }
             ps.setString(6, registro.getRutRepartidor());
             ps.setString(7, registro.getNombreRepartidor());
-            ps.setTimestamp(8, Timestamp.valueOf(registro.getFechaEntrega()));
+            ps.setString(8, registro.getRutCliente());
+            ps.setString(9, registro.getNombreCliente());
+            ps.setTimestamp(10, Timestamp.valueOf(registro.getFechaEntrega()));
 
             int filasAfectadas = ps.executeUpdate();
             if (filasAfectadas == 0) {
@@ -220,7 +234,8 @@ public class PedidoEntregadoDAO {
                 int nuevoId = llaves.next() ? llaves.getInt(1) : registro.getIdPedidoEntregado();
                 return new RegistroPedidoEntregado(nuevoId, registro.getCodigoPedido(), registro.getTipoPedido(),
                         registro.getDireccionDestino(), registro.getDistanciaKm(), registro.getPesoKg(),
-                        registro.getRutRepartidor(), registro.getNombreRepartidor(), registro.getFechaEntrega());
+                        registro.getRutRepartidor(), registro.getNombreRepartidor(),
+                        registro.getRutCliente(), registro.getNombreCliente(), registro.getFechaEntrega());
             }
 
         } catch (SQLException e) {

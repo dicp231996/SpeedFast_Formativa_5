@@ -49,7 +49,9 @@ public class PanelAsignacionManual extends JPanel {
                 super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
                 if (value instanceof Pedido) {
                     Pedido p = (Pedido) value;
-                    setText(p.getIdPedido() + " | " + p.getTipoPedido() + " | " + p.getDireccionEntrega());
+                    String cliente = p.getCliente() != null ? p.getCliente().getNombreCompleto() : "N/D";
+                    setText(p.getIdPedido() + " | " + p.getTipoPedido() + " | " + p.getDireccionEntrega()
+                            + " | Cliente: " + cliente);
                 }
                 return this;
             }

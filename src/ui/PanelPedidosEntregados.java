@@ -86,7 +86,7 @@ public class PanelPedidosEntregados extends JPanel {
         panelSuperior.add(etiquetaResumen, BorderLayout.SOUTH);
 
         // --- Tabla del historial -----------------------------------------
-        String[] columnas = {"Código", "Tipo", "Dirección de Entrega", "Distancia (km)",
+        String[] columnas = {"Código", "Cliente", "Tipo", "Dirección de Entrega", "Distancia (km)",
                 "Peso (kg)", "Repartidor", "Fecha", "Hora"};
         modeloTabla = new DefaultTableModel(columnas, 0) {
             @Override
@@ -164,6 +164,7 @@ public class PanelPedidosEntregados extends JPanel {
         for (RegistroPedidoEntregado registro : registros) {
             modeloTabla.addRow(new Object[]{
                     registro.getCodigoPedido(),
+                    registro.getNombreCliente() != null ? registro.getNombreCliente() : "N/D",
                     registro.getTipoPedido(),
                     registro.getDireccionDestino(),
                     registro.getDistanciaKm(),
@@ -218,6 +219,8 @@ public class PanelPedidosEntregados extends JPanel {
         JPanel panelFormulario = new JPanel(new GridLayout(0, 2, 8, 8));
         panelFormulario.add(new JLabel("Código de pedido:"));
         panelFormulario.add(new JLabel(registro.getCodigoPedido() + " (" + registro.getTipoPedido() + ")"));
+        panelFormulario.add(new JLabel("Cliente:"));
+        panelFormulario.add(new JLabel(registro.getNombreCliente() != null ? registro.getNombreCliente() : "N/D"));
         panelFormulario.add(new JLabel("Dirección de entrega:"));
         panelFormulario.add(campoDireccion);
         panelFormulario.add(new JLabel("Distancia (km):"));
@@ -307,7 +310,7 @@ public class PanelPedidosEntregados extends JPanel {
     private void abrirPapelera() {
         ArrayList<RegistroPedidoEntregado> papelera = servicioPedidos.listarPapeleraHistorial();
 
-        String[] columnas = {"Código", "Tipo", "Dirección", "Repartidor", "Fecha"};
+        String[] columnas = {"Código", "Cliente", "Tipo", "Dirección", "Repartidor", "Fecha"};
         DefaultTableModel modeloPapelera = new DefaultTableModel(columnas, 0) {
             @Override
             public boolean isCellEditable(int row, int column) {
@@ -317,6 +320,7 @@ public class PanelPedidosEntregados extends JPanel {
         for (RegistroPedidoEntregado registro : papelera) {
             modeloPapelera.addRow(new Object[]{
                     registro.getCodigoPedido(),
+                    registro.getNombreCliente() != null ? registro.getNombreCliente() : "N/D",
                     registro.getTipoPedido(),
                     registro.getDireccionDestino(),
                     registro.getNombreRepartidor() != null ? registro.getNombreRepartidor() : "N/D",

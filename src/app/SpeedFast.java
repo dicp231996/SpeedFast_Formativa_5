@@ -1,11 +1,13 @@
 package app;
 
+import data.persistence.ClienteDAO;
 import data.persistence.PedidoDAO;
 import data.persistence.RepartidorDAO;
 import data.util.ControladorEnvios;
 import data.util.GestorFases;
 import model.core.Pedido;
 import model.entities.business.ZonaCarga;
+import model.entities.client.Cliente;
 import model.entities.dealer.Repartidor;
 
 import java.io.PrintStream;
@@ -31,7 +33,8 @@ public class SpeedFast {
         // Reemplaza la lectura de pedidos.txt/repartidores.txt: ambas listas
         // se cargan ahora directamente desde la base de datos speedfast_db.
         ArrayList<Repartidor> listaRepartidores = new RepartidorDAO().listarTodos();
-        ArrayList<Pedido> listaPedidos = new PedidoDAO().listarTodos(listaRepartidores);
+        ArrayList<Cliente> listaClientes = new ClienteDAO().listarTodos();
+        ArrayList<Pedido> listaPedidos = new PedidoDAO().listarTodos(listaRepartidores, listaClientes);
         ControladorEnvios controlador = new ControladorEnvios();
         ZonaCarga zonaCarga = new ZonaCarga();
 
