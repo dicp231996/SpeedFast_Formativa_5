@@ -1,6 +1,7 @@
 package model.core;
 
 import data.enumerate.EstadoPedido;
+import model.entities.client.Cliente;
 import model.entities.dealer.Repartidor;
 import model.interfaces.ICancelable;
 import model.interfaces.IDespachable;
@@ -15,6 +16,14 @@ public abstract class Pedido implements IDespachable, ICancelable, IRastreable {
     private String direccionEntrega;
     private String tipoPedido;
     private double distanciaKm;
+
+    // Cliente que realizó el pedido. No se agregó a los constructores (que ya
+    // reciben código, dirección, tipo y distancia) a propósito, para no tener
+    // que tocar PedidoComida/PedidoEncomienda/PedidoExpress: se asigna aparte
+    // con setCliente(...), igual que repartidorAsignado se asigna aparte con
+    // asignarRepartidor(...). ServicioPedidos.registrarPedido(...) exige que
+    // esté presente antes de guardar el pedido.
+    protected Cliente cliente;
 
     protected Repartidor repartidorAsignado;
 
@@ -54,6 +63,8 @@ public abstract class Pedido implements IDespachable, ICancelable, IRastreable {
     public double getDistanciaKm() { return distanciaKm; }
     public Repartidor getRepartidorAsignado() { return repartidorAsignado; }
     public EstadoPedido getEstado() { return estado; }
+    public Cliente getCliente() { return cliente; }
+    public void setCliente(Cliente cliente) { this.cliente = cliente; }
 
     public void setIdPedido(String idPedido) { this.idPedido = idPedido; }
     public void setDireccionEntrega(String direccionEntrega) { this.direccionEntrega = direccionEntrega; }
@@ -170,6 +181,7 @@ public abstract class Pedido implements IDespachable, ICancelable, IRastreable {
     public void mostrarResumen() {
         System.out.println("--- RESUMEN DEL PEDIDO ---");
         System.out.println("ID interno: " + this.id + " | ID: " + this.idPedido + " | Tipo: " + this.tipoPedido);
+        System.out.println("Cliente: " + (this.cliente != null ? this.cliente.getNombreCompleto() : "N/D"));
         System.out.println("Dirección: " + this.direccionEntrega);
         System.out.println("Estado: " + this.estado);
         if (this.repartidorAsignado != null) {

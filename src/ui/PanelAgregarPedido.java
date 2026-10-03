@@ -1,34 +1,35 @@
 package ui;
 
 import data.enumerate.TipoPedido;
-import data.persistence.PedidoDAO;
 import data.util.GestorArchivoPedidos;
 import model.core.Pedido;
-import model.entities.business.ZonaCarga;
+import model.entities.client.Cliente;
 import model.entities.order.PedidoComida;
 import model.entities.order.PedidoEncomienda;
 import model.entities.order.PedidoExpress;
+import service.OperacionNoPermitidaException;
+import service.ServicioClientes;
+import service.ServicioPedidos;
 
 import javax.swing.*;
 import java.awt.*;
-import java.util.ArrayList;
 
 public class PanelAgregarPedido extends JPanel {
 
-    private final ArrayList<Pedido> listaPedidos;
-    private final ZonaCarga zonaCarga;
-    private final PedidoDAO pedidoDAO = new PedidoDAO();
+    private final ServicioPedidos servicioPedidos;
+    private final ServicioClientes servicioClientes;
 
     private JComboBox<TipoPedido> comboTipo;
+    private JComboBox<Cliente> comboCliente;
     private JTextField campoId;
     private JTextField campoDireccion;
     private JSpinner spinnerDistancia;
     private JLabel labelPeso;
     private JSpinner spinnerPeso;
 
-    public PanelAgregarPedido(Navegador navegador, ArrayList<Pedido> listaPedidos, ZonaCarga zonaCarga) {
-        this.listaPedidos = listaPedidos;
-        this.zonaCarga = zonaCarga;
+    public PanelAgregarPedido(Navegador navegador, ServicioPedidos servicioPedidos, ServicioClientes servicioClientes) {
+        this.servicioPedidos = servicioPedidos;
+        this.servicioClientes = servicioClientes;
         construirInterfaz(navegador);
     }
 
@@ -43,6 +44,7 @@ public class PanelAgregarPedido extends JPanel {
         panelFormulario.setBorder(BorderFactory.createEmptyBorder(20, 60, 10, 60));
 
         comboTipo = new JComboBox<>(TipoPedido.values());
+        comboCliente = new JComboBox<>();
         campoId = new JTextField();
         campoId.setEditable(false);
         campoDireccion = new JTextField();
@@ -50,6 +52,8 @@ public class PanelAgregarPedido extends JPanel {
         labelPeso = new JLabel("Peso (kg):");
         spinnerPeso = new JSpinner(new SpinnerNumberModel(1.0, 0.1, 999.0, 0.1));
 
+        panelFormulario.add(new JLabel("Cliente:"));
+        panelFormulario.add(comboCliente);
         panelFormulario.add(new JLabel("Tipo de pedido:"));
         panelFormulario.add(comboTipo);
         panelFormulario.add(new JLabel("ID (autogenerado):"));
@@ -81,14 +85,36 @@ public class PanelAgregarPedido extends JPanel {
 
     public void actualizarFormulario() {
         TipoPedido tipoSeleccionado = (TipoPedido) comboTipo.getSelectedItem();
-        campoId.setText(GestorArchivoPedidos.siguienteId(tipoSeleccionado, listaPedidos));
+        campoId.setText(GestorArchivoPedidos.siguienteId(tipoSeleccionado, servicioPedidos.getListaPedidos()));
 
         boolean esEncomienda = tipoSeleccionado == TipoPedido.ENCOMIENDA;
         labelPeso.setVisible(esEncomienda);
         spinnerPeso.setVisible(esEncomienda);
+
+        // Refresca la nómina de clientes cada vez que se vuelve a mostrar
+        // este panel, por si se registró uno nuevo desde "Gestión de
+        // Clientes" mientras tanto. Se intenta conservar el cliente que ya
+        // estuviera seleccionado.
+        Object clienteSeleccionado = comboCliente.getSelectedItem();
+        comboCliente.removeAllItems();
+        for (Cliente cliente : servicioClientes.getListaClientes()) {
+            comboCliente.addItem(cliente);
+        }
+        if (clienteSeleccionado != null) {
+            comboCliente.setSelectedItem(clienteSeleccionado);
+        }
     }
 
     private void guardarPedido() {
+        Cliente clienteSeleccionado = (Cliente) comboCliente.getSelectedItem();
+        if (clienteSeleccionado == null) {
+            JOptionPane.showMessageDialog(this,
+                    "No hay ningún cliente seleccionado. Si todavía no tienes clientes registrados, "
+                            + "ve primero a \"Gestión de Clientes\" y registra al menos uno.",
+                    "Falta seleccionar un cliente", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+
         TipoPedido tipoSeleccionado = (TipoPedido) comboTipo.getSelectedItem();
         String id = campoId.getText();
         String direccion = campoDireccion.getText().trim();
@@ -117,14 +143,21 @@ public class PanelAgregarPedido extends JPanel {
                 return;
         }
 
-        listaPedidos.add(nuevoPedido);
-        zonaCarga.agregarPedido(nuevoPedido);
-        pedidoDAO.insertar(nuevoPedido);
+        nuevoPedido.setCliente(clienteSeleccionado);
 
-        JOptionPane.showMessageDialog(this, "Pedido " + id + " guardado correctamente.",
-                "Pedido registrado", JOptionPane.INFORMATION_MESSAGE);
+        // El servicio se encarga de mantener consistentes la lista en
+        // memoria, la zona de carga y la base de datos: el panel ya no
+        // conoce esos detalles.
+        try {
+            servicioPedidos.registrarPedido(nuevoPedido);
+            JOptionPane.showMessageDialog(this, "Pedido " + id + " guardado correctamente.",
+                    "Pedido registrado", JOptionPane.INFORMATION_MESSAGE);
 
-        campoDireccion.setText("");
-        actualizarFormulario();
+            campoDireccion.setText("");
+            actualizarFormulario();
+        } catch (OperacionNoPermitidaException e) {
+            JOptionPane.showMessageDialog(this, e.getMessage(),
+                    "Error al registrar", JOptionPane.ERROR_MESSAGE);
+        }
     }
 }

@@ -82,6 +82,19 @@ public class ZonaCarga {
         return null;
     }
 
+    // Quita un pedido por completo de la Zona de Carga: tanto del historial
+    // de registrados (lo que muestra PanelZonaCarga) como de la cola de
+    // confirmados en espera de ser retirados, si es que todavía estaba ahí.
+    // Se usa al eliminar un pedido desde la interfaz para mantener la
+    // memoria consistente con lo que queda en la base de datos.
+    public synchronized void eliminarPedido(Pedido pedido) {
+        if (pedido == null) {
+            return;
+        }
+        pedidosRegistrados.remove(pedido);
+        pedidosConfirmados.remove(pedido);
+    }
+
     public synchronized boolean estaVacia() {
         return pedidosConfirmados.isEmpty();
     }

@@ -1,7 +1,9 @@
 package ui;
 
+import data.enumerate.EstadoPedido;
 import model.core.Pedido;
-import model.entities.business.ZonaCarga;
+import service.OperacionNoPermitidaException;
+import service.ServicioPedidos;
 
 import javax.swing.*;
 import javax.swing.table.DefaultTableModel;
@@ -14,14 +16,18 @@ public class PanelZonaCarga extends JPanel {
     private static final String FILTRO_TODOS = "Todos";
     private static final String[] TIPOS = {"Comida", "Encomienda", "Express"};
 
-    private final ZonaCarga zonaCarga;
+    private final ServicioPedidos servicioPedidos;
+
     private ArrayList<Pedido> pedidosOrdenados;
+    private ArrayList<Pedido> pedidosFiltrados;
     private DefaultTableModel modeloTabla;
+    private JTable tabla;
     private JLabel etiquetaResumen;
     private JComboBox<String> comboFiltro;
 
-    public PanelZonaCarga(ZonaCarga zonaCarga, Navegador navegador) {
-        this.zonaCarga = zonaCarga;
+    public PanelZonaCarga(ServicioPedidos servicioPedidos, Navegador navegador) {
+        this.servicioPedidos = servicioPedidos;
+        this.pedidosFiltrados = new ArrayList<>();
         construirInterfaz(navegador);
     }
 
@@ -56,20 +62,25 @@ public class PanelZonaCarga extends JPanel {
         modeloTabla = new DefaultTableModel(columnas, 0) {
             @Override
             public boolean isCellEditable(int row, int column) {
-                return false; // vista de solo lectura
+                return false;
             }
         };
-        JTable tabla = new JTable(modeloTabla);
+        tabla = new JTable(modeloTabla);
         tabla.setRowHeight(22);
+        tabla.setSelectionMode(javax.swing.ListSelectionModel.SINGLE_SELECTION);
         JScrollPane scroll = new JScrollPane(tabla);
 
         JPanel panelCentro = new JPanel(new BorderLayout());
         panelCentro.add(panelSuperior, BorderLayout.NORTH);
         panelCentro.add(scroll, BorderLayout.CENTER);
 
+        JButton botonEliminar = new JButton("🗑 Eliminar Pedido Seleccionado");
+        botonEliminar.addActionListener(e -> eliminarPedidoSeleccionado());
+
         JButton botonVolver = new JButton("⬅ Volver al menú");
         botonVolver.addActionListener(e -> navegador.volver());
         JPanel panelBoton = new JPanel();
+        panelBoton.add(botonEliminar);
         panelBoton.add(botonVolver);
 
         add(titulo, BorderLayout.NORTH);
@@ -79,13 +90,12 @@ public class PanelZonaCarga extends JPanel {
         actualizarDatos();
     }
 
-    // Se invoca cada vez que se vuelve a mostrar este panel (ver
-    // VentanaPrincipal.refrescarPanel): recarga la copia de pedidos desde la
-    // Zona de Carga (por si se agregaron pedidos o se hicieron asignaciones
-    // desde la última vez que se vio esta pantalla), la reordena por ID
-    // correlativo y reaplica el filtro "Todos" por defecto.
     public void actualizarDatos() {
-        this.pedidosOrdenados = zonaCarga.listarRegistrados();
+        // Los pedidos ya ENTREGADOS no se muestran aquí: tienen su propia
+        // pestaña ("Pedidos Entregados"), respaldada por el historial de la
+        // base de datos en vez de esta vista en memoria.
+        this.pedidosOrdenados = servicioPedidos.getZonaCarga().listarRegistrados();
+        this.pedidosOrdenados.removeIf(pedido -> pedido.getEstado() == EstadoPedido.ENTREGADO);
         this.pedidosOrdenados.sort(Comparator.comparingInt(Pedido::getId));
         actualizarResumen();
         comboFiltro.setSelectedItem(FILTRO_TODOS);
@@ -119,6 +129,7 @@ public class PanelZonaCarga extends JPanel {
 
     private void aplicarFiltro(String filtro) {
         modeloTabla.setRowCount(0);
+        pedidosFiltrados = new ArrayList<>();
 
         for (Pedido pedido : pedidosOrdenados) {
             if (FILTRO_TODOS.equals(filtro) || pedido.getTipoPedido().equals(filtro)) {
@@ -130,7 +141,44 @@ public class PanelZonaCarga extends JPanel {
                         pedido.getDistanciaKm(),
                         pedido.getEstado().name()
                 });
+                pedidosFiltrados.add(pedido);
             }
+        }
+    }
+
+    // Elimina el pedido actualmente seleccionado en la tabla. El panel ya no
+    // decide cuándo está permitido ni cómo mantener consistentes la zona de
+    // carga, la lista en memoria y la base de datos: solo le pide a
+    // ServicioPedidos que lo elimine, y si la operación no es válida (regla
+    // de negocio o fallo de base de datos), el servicio lo avisa lanzando
+    // OperacionNoPermitidaException con un mensaje ya listo para mostrar.
+    private void eliminarPedidoSeleccionado() {
+        int filaSeleccionada = tabla.getSelectedRow();
+        if (filaSeleccionada < 0 || filaSeleccionada >= pedidosFiltrados.size()) {
+            JOptionPane.showMessageDialog(this, "Selecciona primero un pedido de la tabla.",
+                    "Ningún pedido seleccionado", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+
+        Pedido pedido = pedidosFiltrados.get(filaSeleccionada);
+
+        int confirmacion = JOptionPane.showConfirmDialog(this,
+                "¿Eliminar definitivamente el pedido " + pedido.getIdPedido()
+                        + " (" + pedido.getDireccionEntrega() + ")?\nEsta acción no se puede deshacer.",
+                "Confirmar eliminación", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+
+        if (confirmacion != JOptionPane.YES_OPTION) {
+            return;
+        }
+
+        try {
+            servicioPedidos.eliminarPedido(pedido);
+            actualizarDatos();
+            JOptionPane.showMessageDialog(this, "Pedido " + pedido.getIdPedido() + " eliminado correctamente.",
+                    "Eliminación exitosa", JOptionPane.INFORMATION_MESSAGE);
+        } catch (OperacionNoPermitidaException e) {
+            JOptionPane.showMessageDialog(this, e.getMessage(),
+                    "No se pudo eliminar", JOptionPane.WARNING_MESSAGE);
         }
     }
 }

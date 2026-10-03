@@ -2,6 +2,7 @@ package data.persistence;
 
 import data.enumerate.EstadoPedido;
 import model.core.Pedido;
+import model.entities.client.Cliente;
 import model.entities.dealer.Repartidor;
 import model.entities.order.PedidoComida;
 import model.entities.order.PedidoEncomienda;
@@ -25,12 +26,14 @@ public class PedidoDAO {
     // el repartidor que ya tuvieran asignado de una ejecución anterior (si
     // corresponde), enlazándolo con los objetos Repartidor ya cargados en
     // memoria (repartidoresCargados) a través de su RUT.
-    public ArrayList<Pedido> listarTodos(ArrayList<Repartidor> repartidoresCargados) {
+    public ArrayList<Pedido> listarTodos(ArrayList<Repartidor> repartidoresCargados, ArrayList<Cliente> clientesCargados) {
         ArrayList<Pedido> listaPedidos = new ArrayList<>();
 
         String sql = "SELECT p.codigo_pedido, p.tipo_pedido, p.direccion_destino, p.distancia_km, "
-                + "p.peso_kg, p.estado, p.motivo_cancelacion, r.rut AS rut_asignado "
-                + "FROM Pedido p LEFT JOIN Repartidor r ON p.id_repartidor_asignado = r.id_repartidor "
+                + "p.peso_kg, p.estado, p.motivo_cancelacion, r.rut AS rut_asignado, c.rut AS rut_cliente "
+                + "FROM Pedido p "
+                + "LEFT JOIN Repartidor r ON p.id_repartidor_asignado = r.id_repartidor "
+                + "LEFT JOIN Cliente c ON p.id_cliente = c.id_cliente "
                 + "ORDER BY p.id_pedido";
 
         try (Connection conexion = ConexionBD.obtenerConexion();
@@ -57,6 +60,16 @@ public class PedidoDAO {
                     for (Repartidor candidato : repartidoresCargados) {
                         if (rutAsignado.equals(candidato.getRut())) {
                             pedido.setRepartidorAsignado(candidato);
+                            break;
+                        }
+                    }
+                }
+
+                String rutCliente = rs.getString("rut_cliente");
+                if (rutCliente != null) {
+                    for (Cliente candidato : clientesCargados) {
+                        if (rutCliente.equals(candidato.getRut())) {
+                            pedido.setCliente(candidato);
                             break;
                         }
                     }
@@ -100,23 +113,37 @@ public class PedidoDAO {
         String descripcion = "Pedido de " + pedido.getTipoPedido() + " a " + pedido.getDireccionEntrega();
         Double peso = (pedido instanceof PedidoEncomienda) ? ((PedidoEncomienda) pedido).getPesoKg() : null;
 
-        String sql = "INSERT INTO Pedido (codigo_pedido, tipo_pedido, descripcion, direccion_destino, "
-                + "distancia_km, peso_kg, estado) VALUES (?, ?, ?, ?, ?, ?, ?)";
+        // id_cliente se resuelve con una subconsulta por RUT, igual que
+        // id_repartidor_asignado en actualizarEstado(...): si pedido.getCliente()
+        // es null, se pasa NULL como RUT, la subconsulta no encuentra ninguna
+        // fila y el escalar resultante es NULL (no hace falta una rama de SQL
+        // distinta para el caso sin cliente).
+        String sql = "INSERT INTO Pedido (codigo_pedido, id_cliente, tipo_pedido, descripcion, direccion_destino, "
+                + "distancia_km, peso_kg, estado) "
+                + "VALUES (?, (SELECT id_cliente FROM Cliente WHERE rut = ?), ?, ?, ?, ?, ?, ?)";
 
         try (Connection conexion = ConexionBD.obtenerConexion();
              PreparedStatement ps = conexion.prepareStatement(sql)) {
 
             ps.setString(1, pedido.getIdPedido());
-            ps.setString(2, nombreClaseDe(pedido));
-            ps.setString(3, descripcion);
-            ps.setString(4, pedido.getDireccionEntrega());
-            ps.setDouble(5, pedido.getDistanciaKm());
-            if (peso != null) {
-                ps.setDouble(6, peso);
+
+            Cliente cliente = pedido.getCliente();
+            if (cliente != null) {
+                ps.setString(2, cliente.getRut());
             } else {
-                ps.setNull(6, Types.DOUBLE);
+                ps.setNull(2, Types.VARCHAR);
             }
-            ps.setString(7, pedido.getEstado().name());
+
+            ps.setString(3, nombreClaseDe(pedido));
+            ps.setString(4, descripcion);
+            ps.setString(5, pedido.getDireccionEntrega());
+            ps.setDouble(6, pedido.getDistanciaKm());
+            if (peso != null) {
+                ps.setDouble(7, peso);
+            } else {
+                ps.setNull(7, Types.DOUBLE);
+            }
+            ps.setString(8, pedido.getEstado().name());
 
             ps.executeUpdate();
 
@@ -160,6 +187,44 @@ public class PedidoDAO {
         } catch (SQLException e) {
             System.err.println("Error al actualizar el pedido " + pedido.getIdPedido()
                     + " en la base de datos: " + e.getMessage());
+        }
+    }
+
+    // Elimina un pedido de la base de datos, identificado por su código de
+    // negocio (codigo_pedido). Antes de borrar el pedido en sí, borra las
+    // filas de Entrega que lo referencian (si las tuviera) para no violar la
+    // restricción de llave foránea Entrega.id_pedido -> Pedido.id_pedido.
+    // Ambos borrados se hacen dentro de una misma transacción: si algo
+    // falla, no queda la base de datos a medio borrar.
+    public boolean eliminar(String codigoPedido) {
+        String sqlBorrarEntregas = "DELETE FROM Entrega WHERE id_pedido = "
+                + "(SELECT id_pedido FROM Pedido WHERE codigo_pedido = ?)";
+        String sqlBorrarPedido = "DELETE FROM Pedido WHERE codigo_pedido = ?";
+
+        try (Connection conexion = ConexionBD.obtenerConexion()) {
+            conexion.setAutoCommit(false);
+
+            try (PreparedStatement psEntregas = conexion.prepareStatement(sqlBorrarEntregas);
+                 PreparedStatement psPedido = conexion.prepareStatement(sqlBorrarPedido)) {
+
+                psEntregas.setString(1, codigoPedido);
+                psEntregas.executeUpdate();
+
+                psPedido.setString(1, codigoPedido);
+                int filasAfectadas = psPedido.executeUpdate();
+
+                conexion.commit();
+                return filasAfectadas > 0;
+
+            } catch (SQLException e) {
+                conexion.rollback();
+                throw e;
+            }
+
+        } catch (SQLException e) {
+            System.err.println("Error al eliminar el pedido " + codigoPedido
+                    + " de la base de datos: " + e.getMessage());
+            return false;
         }
     }
 

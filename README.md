@@ -17,10 +17,11 @@ persistente de todo en una base de datos **MySQL**.
 3. [Modelo de dominio](#modelo-de-dominio)
 4. [Concurrencia](#concurrencia)
 5. [Persistencia (base de datos)](#persistencia-base-de-datos)
-6. [Interfaz gráfica (Swing)](#interfaz-gráfica-swing)
-7. [Cómo ejecutar el proyecto](#cómo-ejecutar-el-proyecto)
-8. [Estructura de carpetas](#estructura-de-carpetas)
-9. [Limitaciones conocidas](#limitaciones-conocidas)
+6. [Capa de servicio](#capa-de-servicio)
+7. [Interfaz gráfica (Swing)](#interfaz-gráfica-swing)
+8. [Cómo ejecutar el proyecto](#cómo-ejecutar-el-proyecto)
+9. [Estructura de carpetas](#estructura-de-carpetas)
+10. [Limitaciones conocidas](#limitaciones-conocidas)
 
 ---
 
@@ -41,8 +42,16 @@ persistente de todo en una base de datos **MySQL**.
 - **Persistencia en base de datos MySQL**: pedidos, repartidores y el
   historial de entregas se guardan y leen directamente desde una base de
   datos, reemplazando el enfoque inicial de archivos `.txt`.
-- **Gestión de repartidores**: nómina completa de empleados, alta de nuevos
-  repartidores y conteo de cuántas entregas realizó cada uno durante el día.
+- **Gestión de repartidores**: nómina completa de empleados, alta, **baja** y
+  **modificación** de repartidores, y conteo de cuántas entregas realizó cada
+  uno durante el día.
+- **Gestión de clientes**: todo pedido pertenece a un cliente (RUT, nombre,
+  teléfono, dirección, correo); nómina con alta, baja y modificación, igual
+  que la de repartidores.
+- **Edición del historial de entregas**: los registros de `PedidoEntregado`
+  se pueden corregir o eliminar desde la pestaña "Pedidos Entregados"; lo
+  eliminado queda en una **papelera en memoria** restaurable mientras la
+  aplicación siga abierta.
 - Manejo correcto de **tildes/ñ (UTF-8)** en toda la aplicación (consola,
   archivos y base de datos).
 
@@ -58,8 +67,13 @@ de capas (modelo de dominio / persistencia / interfaz gráfica).
 app       -> Puntos de entrada de la aplicación (consola y GUI)
 model     -> Entidades de dominio (Pedido, Repartidor, Persona, etc.)
 data      -> Enumeradores, utilidades y capa de acceso a datos (DAO)
+service   -> Capa de servicio: reglas de negocio + coordinación entre UI y DAO
 ui        -> Paneles y ventanas Swing
 ```
+
+La interfaz **no llama a los DAO directamente**: le pide la operación que
+necesita a la capa de `service`, y es esa capa quien decide cómo ejecutarla
+y mantener todo consistente (ver [Capa de servicio](#capa-de-servicio)).
 
 ---
 
@@ -106,6 +120,22 @@ interfaz propia `IRunnable`). Contiene:
   `estaCercaUbicacion`: usados por el algoritmo de asignación automática.
 - Un arreglo fijo de máximo 5 pedidos asignados simultáneamente.
 
+### Cliente
+
+`Cliente` también hereda de `Persona` (nombre, teléfono) y agrega `rut`
+(clave de negocio, igual que en `Repartidor`), `direccion` y `correo`
+(opcional). Es quien "recibe" el pedido: `Pedido.cliente` guarda esa
+relación, asignada con `setCliente(...)` **después** de construir el pedido
+(no se agregó a los constructores de `PedidoComida`/`PedidoEncomienda`/
+`PedidoExpress` para no tener que tocar los tres), tal como
+`repartidorAsignado` se asigna aparte con `asignarRepartidor(...)`.
+
+La relación es obligatoria a nivel de negocio — `ServicioPedidos.
+registrarPedido(...)` rechaza guardar un pedido sin cliente — pero la
+columna `Pedido.id_cliente` en la base de datos quedó `NULL`-able, para no
+romper los pedidos de prueba que ya existían antes de que esta entidad se
+agregara al proyecto.
+
 ### ZonaCarga
 
 Actúa como una bodega/cola compartida de pedidos pendientes por retirar.
@@ -147,20 +177,39 @@ El proyecto usa **JDBC puro** (sin frameworks ORM) contra una base de datos
 
 | Script | Uso |
 |---|---|
-| `schema_speedfast.sql` | Crea la base de datos y las 3 tablas desde cero. |
+| `schema_speedfast.sql` | Crea la base de datos y las 5 tablas desde cero. |
 | `migracion_alter_tablas.sql` | Migra un esquema simple preexistente al esquema extendido (agrega columnas). |
+| `migracion_pedidos_entregados.sql` | Agrega la tabla `PedidoEntregado` (historial) a una base ya existente. |
+| `migracion_clientes.sql` | Agrega la tabla `Cliente` y la columna `Pedido.id_cliente` a una base ya existente, con 10 clientes de ejemplo. |
 | `datos_iniciales.sql` | Carga de datos de ejemplo (15 pedidos, 30 repartidores). |
+| `reset_datos_prueba.sql` | Vacía `Pedido`/`Entrega`/`PedidoEntregado` y carga 30 pedidos de prueba nuevos (reseteo completo). |
+| `reset_solo_pedidos.sql` | Igual que el anterior pero sin tocar `PedidoEntregado` (conserva el historial). |
 
 ### Tablas
 
 - **Repartidor**: `id_repartidor`, `rut` (clave de negocio, único),
   `nombre`, `vehiculo`, `telefono`, `tipo_servicio`,
   `tiene_mochila_termica`, `capacidad_peso_max`, `esta_cerca_ubicacion`.
+- **Cliente**: `id_cliente`, `rut` (clave de negocio, único), `nombre`,
+  `telefono`, `direccion`, `correo` (opcional).
 - **Pedido**: `id_pedido`, `codigo_pedido` (clave de negocio, único),
-  `tipo_pedido`, `descripcion`, `direccion_destino`, `distancia_km`,
-  `peso_kg`, `estado`, `motivo_cancelacion`, `id_repartidor_asignado` (FK).
-- **Entrega**: historial de entregas — `id_pedido` (FK), `id_repartidor`
-  (FK), `fecha_entrega`, `estado_entrega`.
+  `id_cliente` (FK, `NULL`-able), `tipo_pedido`, `descripcion`,
+  `direccion_destino`, `distancia_km`, `peso_kg`, `estado`,
+  `motivo_cancelacion`, `id_repartidor_asignado` (FK). Un pedido permanece
+  aquí durante TODO su ciclo de vida, incluido después de `ENTREGADO` (así
+  `Entrega` conserva su integridad referencial).
+- **Entrega**: historial técnico de entregas — `id_pedido` (FK),
+  `id_repartidor` (FK), `fecha_entrega`, `estado_entrega`.
+- **PedidoEntregado**: historial de negocio de pedidos **entregados con
+  éxito**, pensado para la pestaña "Pedidos Entregados" y para métricas
+  futuras. A propósito es una tabla **denormalizada** (sin llaves foráneas):
+  guarda una copia de `codigo_pedido`, `tipo_pedido`, `direccion_destino`,
+  `distancia_km`, `peso_kg`, `rut_repartidor` y `nombre_repartidor` como
+  texto plano, más `fecha_entrega` (con índice dedicado). Así:
+  - Las consultas por fecha (o las métricas que se agreguen más adelante)
+    no necesitan hacer `JOIN` con `Pedido`/`Repartidor`.
+  - El historial sobrevive intacto aunque el pedido o el repartidor
+    original se eliminen después desde la interfaz.
 
 ### Capa DAO (`data.persistence`)
 
@@ -168,12 +217,35 @@ El proyecto usa **JDBC puro** (sin frameworks ORM) contra una base de datos
   Expone `verificarConexion()`, usado al arrancar la GUI para mostrar un
   diálogo de error claro si la base no está disponible (en vez de que la
   aplicación abra "vacía" sin explicación).
-- `RepartidorDAO`: `listarTodos()` e `insertar(Repartidor)`.
-- `PedidoDAO`: `listarTodos(repartidores)`, `insertar(Pedido)`,
-  `actualizarEstado(Pedido)`.
+- `RepartidorDAO`: `listarTodos()`, `insertar(Repartidor)`,
+  `actualizar(Repartidor)` y `eliminar(rut)`. `eliminar(...)` corre en una
+  transacción: primero libera (deja en `NULL`) cualquier pedido que tuviera
+  asignado, luego borra su historial en `Entrega`, y solo entonces borra la
+  fila de `Repartidor` — así nunca viola las llaves foráneas que apuntan a él.
+- `ClienteDAO`: mismo patrón que `RepartidorDAO` —  `listarTodos()`,
+  `insertar(Cliente)`, `actualizar(Cliente)` y `eliminar(rut)` (libera los
+  pedidos asociados, dejando `id_cliente` en `NULL`, antes de borrar al
+  cliente).
+- `PedidoDAO`: `listarTodos(repartidores, clientes)`, `insertar(Pedido)`,
+  `actualizarEstado(Pedido)` y `eliminar(codigoPedido)`. `eliminar(...)`
+  también usa una transacción: borra primero las filas de `Entrega` que
+  referencian a ese pedido, y luego el pedido mismo. Tanto
+  `id_repartidor_asignado` como `id_cliente` se resuelven en el `INSERT`/
+  `UPDATE` con una subconsulta por RUT (si el pedido no tiene cliente, la
+  subconsulta no encuentra fila y el valor queda `NULL`, sin necesitar una
+  rama de SQL aparte).
 - `EntregaDAO`: `registrarEntrega(...)` y
   `contarEntregasHoyPorRepartidor()` (usado en la nómina para mostrar
   cuántas entregas hizo cada repartidor durante el día).
+- `PedidoEntregadoDAO`: `registrar(Pedido)` (archiva la "fotografía" de un
+  pedido justo al entregarse), `listarTodos()`, `listarEntreFechas(desde,
+  hasta)`, `contarEntregasPorDia()`, y además `actualizar(...)` /
+  `eliminarPorId(...)` / `insertarDesdeRegistro(...)` para editar, borrar y
+  restaurar un registro puntual del historial. Devuelve
+  `RegistroPedidoEntregado` (`model.historial`), un DTO — no un `Pedido` —
+  porque esa fila representa un hecho histórico ya cerrado, sin
+  comportamiento; "editarlo" significa reemplazarlo por una copia nueva
+  (`RegistroPedidoEntregado.conCambios(...)`).
 
 Las relaciones se resuelven por **clave de negocio** (`rut`,
 `codigo_pedido`) mediante subconsultas SQL, en vez de exponer los IDs
@@ -186,6 +258,83 @@ autoincrementales de la base de datos dentro del modelo de dominio Java.
 
 ---
 
+## Capa de servicio
+
+Siguiendo la convención de la industria (DAO = acceso a datos puro, sin
+reglas de negocio), el proyecto incorpora una capa intermedia de
+**servicio** entre la interfaz y los DAO:
+
+```
+UI (paneles Swing)
+   ↓  "registra este pedido", "elimina este repartidor"...
+service.ServicioPedidos / service.ServicioRepartidores / service.ServicioClientes
+   ↓  valida reglas de negocio, decide cómo persistir
+data.persistence (DAO)
+   ↓
+Base de datos
+```
+
+Antes de este refactor, los paneles llamaban directamente a los DAO y
+además mantenían "a mano" la coherencia entre la base de datos, la
+`ZonaCarga` y las listas en memoria. Esa responsabilidad no le corresponde
+ni a la UI ni al DAO, así que se extrajo a dos clases de servicio:
+
+- **`ServicioPedidos`**: dueño de la lista de pedidos en memoria y de la
+  `ZonaCarga`. Expone operaciones de alto nivel: `registrarPedido(...)`
+  (rechaza el pedido si no tiene cliente asociado — ver [Cliente](#cliente)),
+  `confirmarAsignacion(pedido, candidato)` (usada tanto por la asignación
+  automática como la manual), `eliminarPedido(...)`,
+  `cargarDesdeBaseDeDatos(repartidores, clientes)` (carga inicial) y, para el
+  historial, `listarHistorialEntregados()` /
+  `listarHistorialEntregados(desde, hasta)`, `contarEntregasPorDia()`,
+  `actualizarRegistroHistorial(...)`, `eliminarRegistroHistorial(...)` y
+  `restaurarRegistroHistorial(...)`.
+- **`ServicioRepartidores`**: dueño de la lista de repartidores en memoria.
+  Expone `registrarRepartidor(...)`, `actualizarRepartidor(...)`,
+  `eliminarRepartidor(...)`, `contarEntregasHoy()` (combina `RepartidorDAO` y
+  `EntregaDAO` para la nómina) y `cargarDesdeBaseDeDatos()`.
+- **`ServicioClientes`**: dueño de la lista de clientes en memoria. Mismo
+  patrón que `ServicioRepartidores`: `registrarCliente(...)`,
+  `actualizarCliente(...)`, `eliminarCliente(...)` y
+  `cargarDesdeBaseDeDatos()`. La alimentan tanto `PanelGestionClientes` como
+  el combo de selección de cliente en `PanelAgregarPedido`.
+
+**Papelera del historial de entregas:** a diferencia de las otras
+eliminaciones (que son definitivas), `ServicioPedidos.
+eliminarRegistroHistorial(...)` guarda una copia del registro borrado en una
+lista **solo en memoria** (`papeleraHistorial`, nunca persistida). Mientras
+la aplicación siga abierta, `restaurarRegistroHistorial(...)` puede volver a
+insertarla en la base de datos; si la aplicación se cierra sin restaurarla,
+se pierde de verdad.
+
+Cuando una operación no es válida —ya sea por una regla de negocio (por
+ejemplo, intentar eliminar un pedido que está `EN_REPARTO`) o porque la base
+de datos la rechaza (RUT repetido, conexión caída)— el servicio lanza una
+**`OperacionNoPermitidaException`** con un mensaje ya redactado para
+mostrarle al usuario. Así, el panel no necesita conocer la razón técnica:
+solo captura la excepción y muestra su mensaje en un diálogo.
+
+```java
+try {
+    servicioRepartidores.eliminarRepartidor(repartidor);
+    actualizarDatos();
+} catch (OperacionNoPermitidaException e) {
+    JOptionPane.showMessageDialog(this, e.getMessage(), "No se pudo eliminar", JOptionPane.WARNING_MESSAGE);
+}
+```
+
+**Nota de diseño:** el motor de concurrencia (`Repartidor`/`HiloEntrega`,
+dentro de `model.*`) sigue llamando directamente a
+`PedidoDAO`/`EntregaDAO`/`PedidoEntregadoDAO` en vez de pasar por
+`ServicioPedidos`. Es una excepción intencional: esas clases pertenecen a la
+simulación de entregas, no a la interfaz, y hacerlas depender de la capa de
+servicio invertiría la dirección de dependencias que se buscó con este
+refactor (UI → Servicio → DAO/Modelo). `ServicioPedidos` ya tiene un método
+`completarEntrega(...)` (que también archiva en el historial) listo por si
+en el futuro se decide unificar ambos caminos.
+
+---
+
 ## Interfaz gráfica (Swing)
 
 La navegación usa un `CardLayout` central (`VentanaPrincipal`), con un
@@ -195,16 +344,35 @@ anterior. Los paneles principales son:
 | Panel | Función |
 |---|---|
 | `PanelMenuPrincipal` | Menú principal con acceso a las demás secciones. |
-| `PanelAgregarPedido` | Formulario para registrar un nuevo pedido. |
-| `PanelZonaCarga` | Lista/filtra todos los pedidos registrados. |
+| `PanelAgregarPedido` | Formulario para registrar un nuevo pedido; incluye un combo **obligatorio** para elegir el cliente. |
+| `PanelZonaCarga` | Lista/filtra los pedidos registrados **aún no entregados** y permite **eliminarlos**. |
 | `PanelAsignacion` | Asignación **automática** de pedidos a repartidores. |
 | `PanelAsignacionManual` | Asignación **manual**, elegida por el usuario. |
 | `PanelEjecucionHilos` | Consola en vivo de la ejecución de entregas (colores por estado). |
-| `PanelGestionRepartidores` | Nómina de repartidores, entregas del día y alta de nuevos repartidores. |
+| `PanelGestionRepartidores` | Nómina de repartidores, entregas del día, alta, **baja** y **modificación** de repartidores. |
+| `PanelGestionClientes` | Nómina de clientes: alta, baja y modificación. |
+| `PanelPedidosEntregados` | Historial de pedidos **entregados con éxito**, filtrable por rango de fechas, con edición, eliminación y papelera restaurable. |
 
 La ejecución de hilos (`PanelEjecucionHilos`) **solo** se puede iniciar
 después de completar una asignación (manual o automática) exitosa, mediante
 el botón "Realizar Entregas ➜" que aparece en el diálogo de confirmación.
+
+**Zona de Carga vs. Pedidos Entregados:** apenas un pedido llega a
+`ENTREGADO` (dentro de `HiloEntrega`), desaparece de `PanelZonaCarga` y pasa
+a vivir únicamente en `PanelPedidosEntregados`, respaldado por la tabla
+`PedidoEntregado`. Este último panel trae por defecto el último mes del
+historial, con filtros "Desde"/"Hasta" para acotar el rango de fechas (o un
+botón para ver el historial completo), y un resumen con totales por tipo de
+pedido y distancia recorrida — la base para construir métricas más
+elaboradas (entregas por semana, kilómetros por repartidor, etc.) más
+adelante sin tener que tocar el esquema de nuevo.
+
+Desde esta misma pestaña se puede **editar** un registro (dirección,
+distancia, peso y datos del repartidor; el código, tipo y fecha de entrega
+quedan fijos porque identifican el hecho histórico) o **eliminarlo**. Un
+registro eliminado no desaparece del todo: queda en una papelera en memoria
+accesible con el botón "♻ Papelera / Restaurar", disponible mientras la
+aplicación no se cierre.
 
 ---
 
@@ -213,7 +381,8 @@ el botón "Realizar Entregas ➜" que aparece en el diálogo de confirmación.
 1. Instalar y levantar MySQL localmente.
 2. Ejecutar `resources/schema_speedfast.sql` y luego
    `resources/datos_iniciales.sql` (o `migracion_alter_tablas.sql` si ya
-   tenías un esquema simple previo).
+   tenías un esquema simple previo). Si tu base ya existía antes de que se
+   agregara la entidad `Cliente`, corre además `migracion_clientes.sql`.
 3. Ajustar usuario/clave en `data/persistence/ConexionBD.java` si es
    necesario.
 4. Agregar el driver `mysql-connector-j-x.x.x.jar` como librería del
@@ -232,16 +401,19 @@ src/
 │   └── SpeedFastGUI.java       # Punto de entrada de la interfaz gráfica
 ├── data/
 │   ├── enumerate/              # EstadoPedido, TipoPedido, TipoServicio
-│   ├── persistence/            # ConexionBD, RepartidorDAO, PedidoDAO, EntregaDAO
+│   ├── persistence/            # ConexionBD, RepartidorDAO, ClienteDAO, PedidoDAO, EntregaDAO, PedidoEntregadoDAO
 │   └── util/                   # ControladorEnvios, GestorFases, GestorArchivoPedidos
 ├── model/
 │   ├── core/                   # Pedido (abstracta), Persona
 │   ├── entities/
 │   │   ├── business/           # ZonaCarga
+│   │   ├── client/              # Cliente
 │   │   ├── dealer/             # Repartidor
 │   │   └── order/               # PedidoComida, PedidoEncomienda, PedidoExpress
+│   ├── historial/                # RegistroPedidoEntregado (DTO de solo lectura)
 │   ├── interfaces/              # IDespachable, ICancelable, IRastreable, IRunnable
 │   └── valueobjects/            # HiloEntrega
+├── service/                     # ServicioPedidos, ServicioRepartidores, ServicioClientes, OperacionNoPermitidaException
 └── ui/                          # Ventanas y paneles Swing
 resources/                       # Scripts SQL y archivos .txt originales (legado)
 ```

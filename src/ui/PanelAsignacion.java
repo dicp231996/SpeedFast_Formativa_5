@@ -1,10 +1,9 @@
 package ui;
 
 import data.enumerate.EstadoPedido;
-import data.persistence.PedidoDAO;
 import model.core.Pedido;
-import model.entities.business.ZonaCarga;
 import model.entities.dealer.Repartidor;
+import service.ServicioPedidos;
 
 import javax.swing.*;
 import java.awt.*;
@@ -14,17 +13,16 @@ public class PanelAsignacion extends JPanel {
 
     private final ArrayList<Pedido> listaPedidos;
     private final ArrayList<Repartidor> listaRepartidores;
-    private final ZonaCarga zonaCarga;
+    private final ServicioPedidos servicioPedidos;
     private final Navegador navegador;
     private final PanelEjecucionHilos panelEjecucionHilos;
-    private final PedidoDAO pedidoDAO = new PedidoDAO();
 
     public PanelAsignacion(Navegador navegador, ArrayList<Pedido> listaPedidos, ArrayList<Repartidor> listaRepartidores,
-                           ZonaCarga zonaCarga, PanelEjecucionHilos panelEjecucionHilos) {
+                           ServicioPedidos servicioPedidos, PanelEjecucionHilos panelEjecucionHilos) {
         this.navegador = navegador;
         this.listaPedidos = listaPedidos;
         this.listaRepartidores = listaRepartidores;
-        this.zonaCarga = zonaCarga;
+        this.servicioPedidos = servicioPedidos;
         this.panelEjecucionHilos = panelEjecucionHilos;
         construirInterfaz();
     }
@@ -64,6 +62,10 @@ public class PanelAsignacion extends JPanel {
     // muestra el mensaje de asignación exitosa con el botón "Realizar
     // Entregas": este es el ÚNICO punto de entrada a la ejecución de los
     // hilos de entrega, y dispara esa lógica de inmediato al elegirlo.
+    //
+    // El panel ya no sabe CÓMO se confirma una asignación (actualizar al
+    // repartidor, la zona de carga y la base de datos): solo recorre los
+    // candidatos y le pregunta a ServicioPedidos si cada uno es aceptado.
     private void ejecutarAsignacionAutomatica() {
         int confirmados = 0;
         int sinRepartidor = 0;
@@ -75,11 +77,7 @@ public class PanelAsignacion extends JPanel {
 
             boolean asignado = false;
             for (Repartidor candidato : listaRepartidores) {
-                pedido.asignarRepartidor(candidato);
-                if (pedido.getRepartidorAsignado() != null) {
-                    candidato.agregarPedido(pedido);
-                    zonaCarga.agregarPedido(pedido);
-                    pedidoDAO.actualizarEstado(pedido); // persiste CONFIRMADO + repartidor asignado
+                if (servicioPedidos.confirmarAsignacion(pedido, candidato)) {
                     confirmados++;
                     asignado = true;
                     break;

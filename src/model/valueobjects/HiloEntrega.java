@@ -2,6 +2,7 @@ package model.valueobjects;
 
 import data.persistence.EntregaDAO;
 import data.persistence.PedidoDAO;
+import data.persistence.PedidoEntregadoDAO;
 import model.core.Pedido;
 
 import java.util.concurrent.ThreadLocalRandom;
@@ -14,6 +15,7 @@ public class HiloEntrega implements Runnable {
     private Pedido pedido;
     private final PedidoDAO pedidoDAO = new PedidoDAO();
     private final EntregaDAO entregaDAO = new EntregaDAO();
+    private final PedidoEntregadoDAO pedidoEntregadoDAO = new PedidoEntregadoDAO();
 
     public HiloEntrega(Pedido pedido) {
         this.pedido = pedido;
@@ -34,10 +36,14 @@ public class HiloEntrega implements Runnable {
             System.out.println("[" + pedido.getIdPedido() + "] Tu pedido ha sido entregado con éxito.");
             pedido.marcarEntregado();
 
-            // Persiste el estado ENTREGADO y deja la traza en la tabla
-            // Entrega, reemplazando lo que antes solo quedaba en memoria.
+            // Persiste el estado ENTREGADO, deja la traza en la tabla
+            // Entrega, y además archiva una "fotografía" del pedido en el
+            // historial PedidoEntregado (tabla dedicada, pensada para que la
+            // nueva pestaña "Pedidos Entregados" la filtre por fecha sin
+            // tener que tocar la Zona de Carga).
             pedidoDAO.actualizarEstado(pedido);
             entregaDAO.registrarEntrega(pedido, pedido.getRepartidorAsignado(), "ENTREGADO");
+            pedidoEntregadoDAO.registrar(pedido);
 
         } catch (InterruptedException e) {
             System.err.println("-> Alerta: La simulación del pedido " + pedido.getIdPedido() + " fue interrumpida.");

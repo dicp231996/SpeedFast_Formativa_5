@@ -1,11 +1,10 @@
 package ui;
 
 import data.enumerate.EstadoPedido;
-import data.persistence.PedidoDAO;
 import data.util.ControladorEnvios;
 import model.core.Pedido;
-import model.entities.business.ZonaCarga;
 import model.entities.dealer.Repartidor;
+import service.ServicioPedidos;
 
 import javax.swing.*;
 import java.awt.*;
@@ -17,20 +16,19 @@ public class PanelAsignacionManual extends JPanel {
     private final ArrayList<Pedido> listaPedidos;
     private final ArrayList<Repartidor> listaRepartidores;
     private final ControladorEnvios controlador;
-    private final ZonaCarga zonaCarga;
+    private final ServicioPedidos servicioPedidos;
     private final PanelEjecucionHilos panelEjecucionHilos;
-    private final PedidoDAO pedidoDAO = new PedidoDAO();
     private Navegador navegador;
 
     private JComboBox<Pedido> comboPedidosPendientes;
     private JLabel etiquetaEstado;
 
     public PanelAsignacionManual(Navegador navegador, ArrayList<Pedido> listaPedidos, ArrayList<Repartidor> listaRepartidores,
-                                 ControladorEnvios controlador, ZonaCarga zonaCarga, PanelEjecucionHilos panelEjecucionHilos) {
+                                 ControladorEnvios controlador, ServicioPedidos servicioPedidos, PanelEjecucionHilos panelEjecucionHilos) {
         this.listaPedidos = listaPedidos;
         this.listaRepartidores = listaRepartidores;
         this.controlador = controlador;
-        this.zonaCarga = zonaCarga;
+        this.servicioPedidos = servicioPedidos;
         this.panelEjecucionHilos = panelEjecucionHilos;
         construirInterfaz(navegador);
     }
@@ -132,10 +130,10 @@ public class PanelAsignacionManual extends JPanel {
         int indice = Arrays.asList(opciones).indexOf(seleccion);
         Repartidor elegido = candidatos.get(indice);
 
-        pedidoSeleccionado.asignarRepartidor(elegido);
-        elegido.agregarPedido(pedidoSeleccionado);
-        zonaCarga.agregarPedido(pedidoSeleccionado);
-        pedidoDAO.actualizarEstado(pedidoSeleccionado); // persiste CONFIRMADO + repartidor asignado
+        // El panel ya filtró los candidatos elegibles con ControladorEnvios,
+        // así que se espera que esta confirmación tenga éxito; de todos
+        // modos, el servicio es quien decide y persiste.
+        servicioPedidos.confirmarAsignacion(pedidoSeleccionado, elegido);
 
         String[] opcionesExito = { "Aceptar", "Realizar Entregas ➜" };
         int opcion = JOptionPane.showOptionDialog(this,

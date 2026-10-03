@@ -1,12 +1,14 @@
 package ui;
 
 import data.persistence.ConexionBD;
-import data.persistence.PedidoDAO;
-import data.persistence.RepartidorDAO;
 import data.util.ControladorEnvios;
 import model.core.Pedido;
 import model.entities.business.ZonaCarga;
+import model.entities.client.Cliente;
 import model.entities.dealer.Repartidor;
+import service.ServicioClientes;
+import service.ServicioPedidos;
+import service.ServicioRepartidores;
 
 import javax.swing.*;
 import java.awt.*;
@@ -24,7 +26,17 @@ public class VentanaPrincipal extends JFrame implements Navegador {
     public static final String ASIGNACION_MANUAL = "asignacionManual";
     public static final String EJECUCION = "ejecucion";
     public static final String REPARTIDORES = "repartidores";
+    public static final String PEDIDOS_ENTREGADOS = "pedidosEntregados";
+    public static final String CLIENTES = "clientes";
 
+    private final ServicioPedidos servicioPedidos;
+    private final ServicioRepartidores servicioRepartidores;
+    private final ServicioClientes servicioClientes;
+
+    // Alias de conveniencia hacia lo que exponen los servicios: varios
+    // paneles (PanelEjecucionHilos, PanelAsignacion, PanelAsignacionManual)
+    // solo necesitan LEER estas listas, no decidir cómo se persisten, así
+    // que siguen recibiéndolas directamente en vez del servicio completo.
     private final ArrayList<Pedido> listaPedidos;
     private final ArrayList<Repartidor> listaRepartidores;
     private final ZonaCarga zonaCarga;
@@ -39,6 +51,8 @@ public class VentanaPrincipal extends JFrame implements Navegador {
     private PanelAsignacionManual panelAsignacionManual;
     private PanelEjecucionHilos panelEjecucionHilos;
     private PanelGestionRepartidores panelGestionRepartidores;
+    private PanelPedidosEntregados panelPedidosEntregados;
+    private PanelGestionClientes panelGestionClientes;
 
     public VentanaPrincipal() {
         super("SpeedFast - Sistema de Gestión de Despachos");
@@ -63,15 +77,26 @@ public class VentanaPrincipal extends JFrame implements Navegador {
         }
 
         // Reemplaza la lectura de pedidos.txt/repartidores.txt: ambas listas
-        // se cargan ahora directamente desde la base de datos speedfast_db.
-        this.listaRepartidores = new RepartidorDAO().listarTodos();
-        this.listaPedidos = new PedidoDAO().listarTodos(listaRepartidores);
-        this.zonaCarga = new ZonaCarga();
-        this.controlador = new ControladorEnvios();
+        // se cargan ahora directamente desde la base de datos speedfast_db,
+        // a través de la capa de servicio (ServicioPedidos/ServicioRepartidores),
+        // que es quien coordina la persistencia con la memoria de la
+        // aplicación (zona de carga incluida). Los repartidores se cargan
+        // primero porque PedidoDAO necesita esa lista para enlazar cada
+        // pedido con el repartidor que tuviera asignado.
+        this.servicioRepartidores = new ServicioRepartidores();
+        this.servicioRepartidores.cargarDesdeBaseDeDatos();
 
-        for (Pedido pedido : listaPedidos) {
-            zonaCarga.agregarPedido(pedido);
-        }
+        this.servicioClientes = new ServicioClientes();
+        this.servicioClientes.cargarDesdeBaseDeDatos();
+
+        this.zonaCarga = new ZonaCarga();
+        this.servicioPedidos = new ServicioPedidos(zonaCarga);
+        this.servicioPedidos.cargarDesdeBaseDeDatos(servicioRepartidores.getListaRepartidores(),
+                servicioClientes.getListaClientes());
+
+        this.listaRepartidores = servicioRepartidores.getListaRepartidores();
+        this.listaPedidos = servicioPedidos.getListaPedidos();
+        this.controlador = new ControladorEnvios();
 
         this.cardLayout = new CardLayout();
         this.panelContenedor = new JPanel(cardLayout);
@@ -87,12 +112,14 @@ public class VentanaPrincipal extends JFrame implements Navegador {
         setResizable(true);
 
         PanelMenuPrincipal panelMenu = new PanelMenuPrincipal(this);
-        panelAgregarPedido = new PanelAgregarPedido(this, listaPedidos, zonaCarga);
-        panelZonaCarga = new PanelZonaCarga(zonaCarga, this);
+        panelAgregarPedido = new PanelAgregarPedido(this, servicioPedidos, servicioClientes);
+        panelZonaCarga = new PanelZonaCarga(servicioPedidos, this);
         panelEjecucionHilos = new PanelEjecucionHilos(this, listaPedidos, zonaCarga, controlador);
-        panelAsignacionManual = new PanelAsignacionManual(this, listaPedidos, listaRepartidores, controlador, zonaCarga, panelEjecucionHilos);
-        PanelAsignacion panelAsignacion = new PanelAsignacion(this, listaPedidos, listaRepartidores, zonaCarga, panelEjecucionHilos);
-        panelGestionRepartidores = new PanelGestionRepartidores(this, listaRepartidores);
+        panelAsignacionManual = new PanelAsignacionManual(this, listaPedidos, listaRepartidores, controlador, servicioPedidos, panelEjecucionHilos);
+        PanelAsignacion panelAsignacion = new PanelAsignacion(this, listaPedidos, listaRepartidores, servicioPedidos, panelEjecucionHilos);
+        panelGestionRepartidores = new PanelGestionRepartidores(this, servicioRepartidores);
+        panelPedidosEntregados = new PanelPedidosEntregados(this, servicioPedidos);
+        panelGestionClientes = new PanelGestionClientes(this, servicioClientes);
 
         panelContenedor.add(panelMenu, MENU);
         panelContenedor.add(panelAgregarPedido, AGREGAR);
@@ -101,6 +128,8 @@ public class VentanaPrincipal extends JFrame implements Navegador {
         panelContenedor.add(panelAsignacionManual, ASIGNACION_MANUAL);
         panelContenedor.add(panelEjecucionHilos, EJECUCION);
         panelContenedor.add(panelGestionRepartidores, REPARTIDORES);
+        panelContenedor.add(panelPedidosEntregados, PEDIDOS_ENTREGADOS);
+        panelContenedor.add(panelGestionClientes, CLIENTES);
 
         setContentPane(panelContenedor);
 
@@ -137,6 +166,10 @@ public class VentanaPrincipal extends JFrame implements Navegador {
             panelEjecucionHilos.actualizarEstadoBoton();
         } else if (REPARTIDORES.equals(nombrePanel)) {
             panelGestionRepartidores.actualizarDatos();
+        } else if (PEDIDOS_ENTREGADOS.equals(nombrePanel)) {
+            panelPedidosEntregados.actualizarDatos();
+        } else if (CLIENTES.equals(nombrePanel)) {
+            panelGestionClientes.actualizarDatos();
         }
     }
 }
